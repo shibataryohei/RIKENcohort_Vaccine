@@ -1,0 +1,268 @@
+---
+title: "RIKEN: Vaccine"
+subtitle: "June 1st, 2022"
+author: "Ryohei SHIBATA"
+output:
+ powerpoint_presentation:
+  slide_level: 2 # use this to override default
+  reference_doc: ~/Git/R/Template_ENW.pptx
+---
+
+
+```{r ChunkOption, include = FALSE, warning = FALSE}
+# chunk option
+knitr::opts_chunk$set(echo = FALSE, # chunkを出力として表示するか否か
+                      eval = FALSE, # chunkを実際にRのコードとして評価するか否か
+                      warning = FALSE, # chunkに対する警告を表示させるか否か
+                      message = FALSE, # chunkに対するエラーを表示させるか否か
+                      comment = "", # 計算結果の頭につく文字
+                      cache = FALSE ) 
+
+Sys.setlocale("LC_ALL", 'UTF-8')
+options(scipen = 10)
+```
+
+
+```{R}
+# Packages
+source("~/Git/Database/Common/Library_Basic.R" )
+source("~/Git/Database/Common/Library_Bioinformatics.R")
+source("~/Git/Database/Common/Function.R")
+source("~/Git/Database/Common/Function_Mb.R")
+
+readRDS("../Database/OIT/Mb.obj") -> Mb_list
+Mb_list$genus -> Genus_tbl
+Mb_list$species -> Species_tbl
+Mb_list$otu -> OTU_tbl
+Mb_list$assign -> OTUassign_tbw
+
+readRDS("../Database/OIT/WSM.obj") -> WSM_list
+WSM_list$wsm -> WSM_tbl
+WSM_list$class -> WSM_Class_tbl
+
+# source("~/Git/Database/RIKENcohort/RIKENcohort_Function.R")
+# source("~/Git/Database/RIKENcohort/RIKENcohort_Clinicaldata.R")
+# source("~/Git/Database/RIKENcohort/RIKENcohort_Vaccine.R")
+
+```
+
+## LRTI
+```{R}
+LRTI_tbl %>% 
+  group_by(Age, Value) %>% 
+  summarise(Count = n()) %>% 
+  ggplot(., aes(x = Age, y = Count, fill = Value))+
+  geom_bar(stat = "identity")
+ggsave("Vaccine/Barplot_Age_LRTI.png",
+       dpi = 300, h = 2.5, w = 2.5)
+```
+![](Vaccine/Barplot_Age_LRTI.png)
+
+## Vaccination
+```{R}
+Vaccination_tbl %>% 
+  mutate(Value = as.factor(Value)) %>% 
+  group_by(Age, Variable, Value) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Age = fct_relevel_age(Age)) %>%
+  
+  ggplot(., aes(x = Age, y = Count, fill = Value))+
+  geom_bar(stat = "identity",
+           position = position_stack(reverse = TRUE))+
+  facet_wrap(~ Variable)+
+  scale_fill_brewer(palette = "blue")
+ggsave("Vaccine/Barplot_Age_Vaccination.png",
+       dpi = 300, h = 2.5, w = 4)
+```
+![](Vaccine/Barplot_Age_Vaccination.png)
+
+## Antibody
+```{R}
+Antibody_tbl %>% 
+  ggplot(., aes(x = Age, y = Value, fill = Age))+
+  geom_hline(yintercept = 1,
+             color = "darkgray",
+             linetype = "dashed")+
+  geom_jitter(color = "gray")+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA)+
+  facet_wrap(~ Variable, scale = "free_y")+
+  scale_y_log10()
+ggsave("Vaccine/Boxplot_Age_Antibody.png",
+       dpi = 300, h = 2.5 , w = 5)
+```
+![](Vaccine/Boxplot_Age_Antibody.png)
+
+## Angtibody + Vaccination
+```{R}
+Antibody_tbl %>% 
+  inner_join(Vaccination_tbl %>% 
+               mutate(Variable = fct_recode(Variable,
+                                            "PRP" = "Hib",
+                                            "13CPS" = "PCV")) %>% 
+               rename(Vaccination = Value)) %>% 
+  mutate(Vaccination = as.factor(Vaccination)) %>% 
+  
+  ggplot(., aes(x = Vaccination, y = Value, fill = Vaccination))+
+  geom_hline(yintercept = 1,
+             color = "darkgray",
+             linetype = "dashed")+
+  geom_jitter(color = "gray")+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA)+
+  facet_grid(Variable ~ Age, scale = "free", space = "free_x")+
+  scale_y_log10()
+ggsave("Vaccine/Boxplot_Vaccination_Antibody_Age.png",
+       dpi = 300, h = 3.5, w = 4)
+```
+![](Vaccine/Boxplot_Vaccination_Antibody_Age.png)
+## Enterotype
+```{R}
+readr::read_csv("../RKcohort_DMM/CSV/Enterotype.csv") %>%
+  rename(Age_Enterotype = Age) %>% 
+  mutate(Enterotype = as.factor(Enterotype)) %>% 
+  mutate(Age_Enterotype = fct_relevel_age(Age_Enterotype)) -> Enterotype_tbl
+
+Antibody_tbl %>% 
+  inner_join(Enterotype_tbl) %>% 
+  filter(Age_Enterotype %in% c("1M", "1Y", "5Y", "7Y")) -> Antibody_Enterotype_tbl
+
+Antibody_Enterotype_tbl %>% 
+  group_by(SubjectID, Age_Enterotype, Enterotype) %>% 
+  summarise() %>% 
+  group_by(Age_Enterotype, Enterotype) %>% 
+  summarise(Count = n())
+
+Antibody_Enterotype_tbl %>% 
+  filter(Variable == "PRP") %>% 
+  ggplot(., aes(x = Enterotype, y = Value, fill = Age))+
+  geom_hline(yintercept = 1,
+             color = "darkgray",
+             linetype = "dashed")+
+  geom_jitter(color = "gray")+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA)+
+  facet_grid(Age_Enterotype ~ Age, scale = "free", space = "free_x")+
+  scale_y_log10()
+
+Antibody_Enterotype_tbl %>% 
+  filter(Variable == "13CPS") %>% 
+  ggplot(., aes(x = Enterotype, y = Value, fill = Age))+
+  geom_hline(yintercept = 1,
+             color = "darkgray",
+             linetype = "dashed")+
+  geom_jitter(color = "gray")+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA)+
+  facet_grid(Age_Enterotype ~ Age, scale = "free", space = "free_x")+
+  scale_y_log10()
+```
+
+
+## Microbiota Age
+```{R}
+readr::read_csv("../RKcohort_DMM/MicrobiotaAge.csv") -> MA_tbl
+
+Antibody_tbl %>% 
+   filter(Age != "UCB") %>% 
+  inner_join(MA_tbl %>% 
+               rename(Age_Feces = Age) %>% 
+               select(-Chronologic_Age, -MAZ) %>% 
+               gather(Variable_Feces, Value_Feces,
+                      -SubjectID, -Age_Feces) %>% 
+               c2f %>% 
+               bind_rows(Alpha_tbl)) %>% 
+  mutate(Value = log(Value, 10)) %>% 
+  inner_join(Vaccination_tbl %>% 
+               mutate(Variable = fct_recode(Variable,
+                                            "PRP" = "Hib",
+                                            "13CPS" = "PCV")) %>% 
+               spread(Age, Value) %>% 
+               mutate(`5Y` = `2Y`,
+                      `7Y` = `2Y`) %>% 
+               select(-`6M`) %>% 
+               gather(Age, Vaccination,
+                      -SubjectID, -Variable)) -> Antibody_Mb_tbw
+```
+
+
+```{R}
+var = "13CPS"
+age_ab = "2Y"
+age_f = "1M"
+var_f <- Variable_Feces[2]
+
+Antibody_Mb_tbw %>% 
+  check_levels("Variable_Feces") -> Variable_Feces
+
+map(c("13CPS", "PRP"), function(var){
+  map(Variable_Feces, function(var_f){
+  map(c("1Y", "2Y", "5Y", "7Y"), function(age_ab){
+    map(c("1W", "1M", "1Y", "5Y", "7Y"), function(age_f){
+      
+      Antibody_Mb_tbw %>% 
+        filter(Variable == var) %>% 
+        filter(Variable_Feces == var_f) %>% 
+        filter(Age == age_ab) %>% 
+        filter(Age_Feces == age_f) %>% 
+        glm(Value ~ Value_Feces + Vaccination,
+            data = .) %>% 
+        broom.mixed::tidy(.,
+                    effects = "fixed",
+                    conf.int = TRUE,
+                    exponentiate = TRUE) %>% 
+        filter(term == "Value_Feces") %>% 
+        mutate(Age = age_ab,
+               Age_Feces = age_f,
+               Variable = var,
+               Variable_Feces = var_f)
+      
+      }) %>% 
+        do.call(bind_rows, .) }) %>% 
+      do.call(bind_rows, .) }) %>% 
+    do.call(bind_rows, .) }) %>% 
+  do.call(bind_rows, .) -> df
+
+df %>% 
+  filter(p.value < 0.05) %>% 
+  select(Variable, Age, Age_Feces, Variable_Feces, p.value,
+         estimate, conf.low, conf.high)# %>% 
+  table2png("Vaccine/Table_Ab_Mb.png")
+  
+```
+
+
+```{R}
+Antibody_Mb_tbw %>% 
+  filter(Variable_Feces == "Microbiota_Age") %>% 
+  filter(Age == "1Y") %>%
+  filter(Age_Feces == "1Y") %>% 
+  ggplot(., aes(x = Value_Feces, y = Value))+
+  geom_point()+
+  stat_smooth(method = "loess",
+              colour = "darkgreen",
+              size = 1.0,
+              se = TRUE,
+              span = 1)+
+  #scale_x_log10()+
+  facet_wrap(~ Variable, scale = "free_x")+
+  theme(strip.text = element_text(size = 12))+
+  scale_y_log10()+
+  labs(x = "Microbiota age",
+       y = "Antibody titer")
+
+Antibody_Mb_tbw %>% 
+  filter(Variable == "13CPS") %>% 
+  filter(Variable_Feces == "Shannon") %>% 
+  filter(Age %in% c("2Y", "7Y")) %>% 
+  filter(Age_Feces == "1Y") %>% 
+  ggplot(., aes(x = Value_Feces, y = Value))+
+  geom_point()+
+  stat_smooth(method = "loess",
+              colour = "darkgreen",
+              size = 1.0,
+              se = TRUE,
+              span = 1)+
+  #scale_x_log10()+
+  facet_wrap(~ Age, scale = "free_y")+
+  theme(strip.text = element_text(size = 12))+
+  scale_y_log10()+
+  labs(x = "Microbiota age",
+       y = "Antibody titer")
+```
