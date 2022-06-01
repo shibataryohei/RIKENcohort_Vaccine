@@ -45,6 +45,73 @@ WSM_list$class -> WSM_Class_tbl
 # source("~/Git/Database/RIKENcohort/RIKENcohort_Vaccine.R")
 
 ```
+## Sample number
+```{R}
+# Vacccine
+Antibody_tbl %>% 
+  mutate(Variable = paste(Variable, "Titer", sep = "_")) %>% 
+  unite_var %>% 
+  spread(Variable, Value) %>% 
+  c2r("SubjectID") -> Antibody_df
+
+Vaccination_tbl %>% 
+  mutate(Variable = paste(Variable, "Vaccination", sep = "_")) %>% 
+  unite_var %>% 
+  spread(Variable, Value) %>% 
+  c2r("SubjectID") -> Vaccination_df
+
+Antibody_tbl %>% 
+   filter(Age != "UCB") %>% 
+  inner_join(Vaccination_tbl %>% 
+               spread(Age, Value) %>% 
+               mutate(`5Y` = `2Y`,
+                      `7Y` = `2Y`) %>% 
+               select(-`6M`) %>% 
+               gather(Age, Vaccination,
+                      -SubjectID, -Variable)) %>% 
+  mutate(Positive = if_else(Value >= 1, "1", "0")) %>% 
+  c2f -> AbVac_tbw
+
+# NP
+Nasopharynx_tbw %>% 
+  select(-Quantative, -Most_Abundant_Species) %>% 
+  c2r("SubjectID") %>% 
+  mutate_all(as.character) %>% 
+  mutate_all(as.numeric) -> Nasopharynx_df
+
+# Mb
+readr::read_csv("../RKcohort_DMM/MicrobiotaAge.csv") -> MA_tbl
+MA_tbl %>% 
+               rename(Age_Feces = Age) %>% 
+               select(-Chronologic_Age, -MAZ) %>% 
+               gather(Variable_Feces, Value_Feces,
+                      -SubjectID, -Age_Feces) %>% 
+               c2f %>% 
+               bind_rows(Alpha_tbl) -> Mb_tbl
+
+Mb_tbl %>% 
+  unite(Variable, Variable_Feces, Age_Feces, sep = "@") %>% 
+  spread(Variable, Value_Feces) %>% 
+  c2r("SubjectID") -> Mb_df
+
+# Merge
+AbVac_tbw %>% 
+  inner_join(Mb_tbl) %>% 
+  mutate(Age_Feces = fct_relevel_age(Age_Feces)) -> AbVacMb_tbw
+```
+
+
+```{R}
+AbVacMb_tbw %>% 
+  group_by(SubjectID, Variable, Age_Feces) %>% 
+  summarise() %>% 
+  group_by(Variable, Age_Feces) %>% 
+  summarise(Count = n()) %>% 
+  spread(Variable, Count) %>% 
+  arrange(Age_Feces) %>% 
+  table2png("Vaccine/Table_SampleNumber.png")
+```
+![](Vaccine/Table_SampleNumber.png)
 
 ## LRTI
 ```{R}
@@ -92,14 +159,22 @@ ggsave("Vaccine/Boxplot_Age_Antibody.png",
 ```
 ![](Vaccine/Boxplot_Age_Antibody.png)
 
+## Positive
+```{R}
+AbVac_tbw %>% 
+  group_by(Variable, Age, Positive) %>% 
+  summarise(Count = n()) %>% 
+  
+  ggplot(., aes(x = Age, y = Count, fill = Positive))+
+  geom_bar(stat = "identity", position = "fill")+
+  facet_wrap(~ Variable)
+ggsave("Vaccine/Barplot_Age_Positive.png",
+       dpi = 300, h = 2.5, w = 4)
+```
+
 ## Angtibody + Vaccination
 ```{R}
-Antibody_tbl %>% 
-  inner_join(Vaccination_tbl %>% 
-               mutate(Variable = fct_recode(Variable,
-                                            "PRP" = "Hib",
-                                            "13CPS" = "PCV")) %>% 
-               rename(Vaccination = Value)) %>% 
+AbVac_tbw %>% 
   mutate(Vaccination = as.factor(Vaccination)) %>% 
   
   ggplot(., aes(x = Vaccination, y = Value, fill = Vaccination))+
@@ -114,6 +189,38 @@ ggsave("Vaccine/Boxplot_Vaccination_Antibody_Age.png",
        dpi = 300, h = 3.5, w = 4)
 ```
 ![](Vaccine/Boxplot_Vaccination_Antibody_Age.png)
+
+
+# Correlatino analysis
+```{R}
+intersect(rownames(Mb_df),
+         rownames(Vaccination_df)) %>% 
+  intersect(rownames(Antibody_df)) %>% 
+  intersect(rownames(Nasopharynx_df)) -> SubjectID_Analysis
+
+bind_cols(Mb_df[SubjectID_Analysis, ],
+          Vaccination_df[SubjectID_Analysis, ],
+          Nasopharynx_df[SubjectID_Analysis, ]) -> VacMbNP_df
+
+microbiome::associate(VacMbNP_df[SubjectID_Analysis, ],
+            Antibody_df[SubjectID_Analysis, ],
+            method = "spearman") %>% 
+  select(-p.adj) %>% 
+  spread(X1, Correlation) %>% 
+  c2r("X2") -> df
+
+pheatmap(df %>% t,
+         cutree_rows = 7,
+         cluster_rows = FALSE,
+         cutree_cols = 5,
+         file = "Vaccine/Heatmap_Titer_Factor.png",
+         res = 300,
+         h = 8, w = 5)
+```
+
+
+# Gut microbiota
+
 ## Enterotype
 ```{R}
 readr::read_csv("../RKcohort_DMM/CSV/Enterotype.csv") %>%
@@ -132,7 +239,7 @@ Antibody_Enterotype_tbl %>%
   summarise(Count = n())
 
 Antibody_Enterotype_tbl %>% 
-  filter(Variable == "PRP") %>% 
+  filter(Variable == "Hib") %>% 
   ggplot(., aes(x = Enterotype, y = Value, fill = Age))+
   geom_hline(yintercept = 1,
              color = "darkgray",
@@ -143,7 +250,7 @@ Antibody_Enterotype_tbl %>%
   scale_y_log10()
 
 Antibody_Enterotype_tbl %>% 
-  filter(Variable == "13CPS") %>% 
+  filter(Variable == "Sp") %>% 
   ggplot(., aes(x = Enterotype, y = Value, fill = Age))+
   geom_hline(yintercept = 1,
              color = "darkgray",
@@ -155,48 +262,22 @@ Antibody_Enterotype_tbl %>%
 ```
 
 
-## Microbiota Age
-```{R}
-readr::read_csv("../RKcohort_DMM/MicrobiotaAge.csv") -> MA_tbl
-
-Antibody_tbl %>% 
-   filter(Age != "UCB") %>% 
-  inner_join(MA_tbl %>% 
-               rename(Age_Feces = Age) %>% 
-               select(-Chronologic_Age, -MAZ) %>% 
-               gather(Variable_Feces, Value_Feces,
-                      -SubjectID, -Age_Feces) %>% 
-               c2f %>% 
-               bind_rows(Alpha_tbl)) %>% 
-  mutate(Value = log(Value, 10)) %>% 
-  inner_join(Vaccination_tbl %>% 
-               mutate(Variable = fct_recode(Variable,
-                                            "PRP" = "Hib",
-                                            "13CPS" = "PCV")) %>% 
-               spread(Age, Value) %>% 
-               mutate(`5Y` = `2Y`,
-                      `7Y` = `2Y`) %>% 
-               select(-`6M`) %>% 
-               gather(Age, Vaccination,
-                      -SubjectID, -Variable)) -> Antibody_Mb_tbw
-```
-
-
+## Titer vs. Mb
 ```{R}
 var = "13CPS"
 age_ab = "2Y"
 age_f = "1M"
 var_f <- Variable_Feces[2]
 
-Antibody_Mb_tbw %>% 
+AbVacMb_tbw %>% 
   check_levels("Variable_Feces") -> Variable_Feces
 
-map(c("13CPS", "PRP"), function(var){
+map(c("SP", "Hib"), function(var){
   map(Variable_Feces, function(var_f){
   map(c("1Y", "2Y", "5Y", "7Y"), function(age_ab){
     map(c("1W", "1M", "1Y", "5Y", "7Y"), function(age_f){
       
-      Antibody_Mb_tbw %>% 
+      AbVacMb_tbw %>% 
         filter(Variable == var) %>% 
         filter(Variable_Feces == var_f) %>% 
         filter(Age == age_ab) %>% 
@@ -266,3 +347,40 @@ Antibody_Mb_tbw %>%
   labs(x = "Microbiota age",
        y = "Antibody titer")
 ```
+
+
+## Positive vs. Mb (Hib)
+```{R}
+map(c("Hib"), function(var){
+  map(Variable_Feces, function(var_f){
+  map(c("1Y", "2Y", "5Y", "7Y"), function(age_ab){
+    map(c("1W", "1M", "1Y", "5Y", "7Y"), function(age_f){
+      AbVacMb_tbw %>% 
+        filter(Variable == var) %>% 
+        filter(Variable_Feces == var_f) %>% 
+        filter(Age == age_ab) %>% 
+        filter(Age_Feces == age_f) %>% 
+        glm(Positive ~ Value_Feces + Vaccination,
+            family = "binomial"(link = "logit"),
+            data = .) %>% 
+        broom.mixed::tidy(.,
+                    effects = "fixed",
+                    conf.int = TRUE,
+                    exponentiate = TRUE) %>% 
+        filter(term == "Value_Feces") %>% 
+        mutate(Age = age_ab,
+               Age_Feces = age_f,
+               Variable = var,
+               Variable_Feces = var_f)
+      }) %>% 
+        do.call(bind_rows, .) }) %>% 
+      do.call(bind_rows, .) }) %>% 
+    do.call(bind_rows, .) }) %>% 
+  do.call(bind_rows, .) -> df2
+
+df2 %>% 
+  filter(p.value < 0.05) %>% 
+  select(Variable, Age, Variable_Feces, Age_Feces,
+         estimate, p.value, conf.low, conf.high)
+```
+
