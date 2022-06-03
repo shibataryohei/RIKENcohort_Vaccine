@@ -30,22 +30,13 @@ source("~/Git/Database/Common/Library_Bioinformatics.R")
 source("~/Git/Database/Common/Function.R")
 source("~/Git/Database/Common/Function_Mb.R")
 
-readRDS("../Database/OIT/Mb.obj") -> Mb_list
-Mb_list$genus -> Genus_tbl
-Mb_list$species -> Species_tbl
-Mb_list$otu -> OTU_tbl
-Mb_list$assign -> OTUassign_tbw
-
-readRDS("../Database/OIT/WSM.obj") -> WSM_list
-WSM_list$wsm -> WSM_tbl
-WSM_list$class -> WSM_Class_tbl
-
+readRDS("../RKcohort/OBJ/Mb.obj") -> Mb_list
 # source("~/Git/Database/RIKENcohort/RIKENcohort_Function.R")
 # source("~/Git/Database/RIKENcohort/RIKENcohort_Clinicaldata.R")
 # source("~/Git/Database/RIKENcohort/RIKENcohort_Vaccine.R")
 
 ```
-## Sample number
+
 ```{R}
 # Vacccine
 Antibody_tbl %>% 
@@ -53,6 +44,8 @@ Antibody_tbl %>%
   unite_var %>% 
   spread(Variable, Value) %>% 
   c2r("SubjectID") -> Antibody_df
+
+SubjectID_Ab <- rownames(Antibody_df)
 
 Vaccination_tbl %>% 
   mutate(Variable = paste(Variable, "Vaccination", sep = "_")) %>% 
@@ -81,18 +74,38 @@ Nasopharynx_tbw %>%
 
 # Mb
 readr::read_csv("../RKcohort_DMM/MicrobiotaAge.csv") -> MA_tbl
+
+readr::read_csv("../RKcohort_DMM/CSV/Enterotype.csv") %>%
+  gather(Variable, Value, -SubjectID, -Age) %>% 
+  filter(!grepl("KS", SubjectID)) %>% 
+  rename(Variable_Feces = Variable,
+         Age_Feces = Age,
+         Value_Feces = Value) %>% 
+  c2f  -> Enterotype_tbl
+
 MA_tbl %>% 
                rename(Age_Feces = Age) %>% 
                select(-Chronologic_Age, -MAZ) %>% 
+  filter(!grepl("KS", SubjectID)) %>% 
                gather(Variable_Feces, Value_Feces,
                       -SubjectID, -Age_Feces) %>% 
                c2f %>% 
-               bind_rows(Alpha_tbl) -> Mb_tbl
+               bind_rows(Alpha_tbl,
+                         Enterotype_tbl) -> Mb_tbl
 
 Mb_tbl %>% 
   unite(Variable, Variable_Feces, Age_Feces, sep = "@") %>% 
   spread(Variable, Value_Feces) %>% 
   c2r("SubjectID") -> Mb_df
+
+## Genus
+Mb_list$genus2 %>% 
+  filter(!grepl("KS", SubjectID)) %>% 
+  filter(SubjectID %in% SubjectID_Ab) -> Genus_tbl
+
+Mb_list$otu %>% 
+  filter(!grepl("KS", SubjectID)) %>% 
+  filter(SubjectID %in% SubjectID_Ab) -> OTU_tbl
 
 # Merge
 AbVac_tbw %>% 
@@ -100,6 +113,8 @@ AbVac_tbw %>%
   mutate(Age_Feces = fct_relevel_age(Age_Feces)) -> AbVacMb_tbw
 ```
 
+# Basic analysis
+## Sample number
 
 ```{R}
 AbVacMb_tbw %>% 
@@ -190,32 +205,253 @@ ggsave("Vaccine/Boxplot_Vaccination_Antibody_Age.png",
 ```
 ![](Vaccine/Boxplot_Vaccination_Antibody_Age.png)
 
-
-# Correlatino analysis
+# Correlatinon analysis
+## Nasopharyngeal vs. Antibody
 ```{R}
-intersect(rownames(Mb_df),
-         rownames(Vaccination_df)) %>% 
-  intersect(rownames(Antibody_df)) %>% 
-  intersect(rownames(Nasopharynx_df)) -> SubjectID_Analysis
+intersect(rownames(Antibody_df),
+          rownames(Nasopharynx_df)) -> SubjectID_AbNP
 
-bind_cols(Mb_df[SubjectID_Analysis, ],
-          Vaccination_df[SubjectID_Analysis, ],
-          Nasopharynx_df[SubjectID_Analysis, ]) -> VacMbNP_df
+associate_r(Nasopharynx_df[SubjectID_AbNP, ],
+                      Antibody_df[SubjectID_AbNP, ],
+            method = "spearman",
+            p.adj.method = "none") %>% 
+  make_list_pheatmap -> Associate_AbNP_list
 
-microbiome::associate(VacMbNP_df[SubjectID_Analysis, ],
-            Antibody_df[SubjectID_Analysis, ],
-            method = "spearman") %>% 
-  select(-p.adj) %>% 
-  spread(X1, Correlation) %>% 
-  c2r("X2") -> df
-
-pheatmap(df %>% t,
+pheatmap(Associate_AbNP_list$cor,
+         display_numbers = Associate_AbNP_list$sd,
+         fontsize_number = 14,
          cutree_rows = 7,
          cluster_rows = FALSE,
          cutree_cols = 5,
-         file = "Vaccine/Heatmap_Titer_Factor.png",
+         file = "Vaccine/Heatmap_Ab_NP.png",
          res = 300,
-         h = 8, w = 5)
+         h = 3, w = 4.5)
+```
+![](Vaccine/Heatmap_Ab_NP.png)
+
+## Gut microbiota vs. Antibody
+```{R}
+intersect(rownames(Antibody_df),
+          rownames(Mb_df)) -> SubjectID_AbMb
+
+associate_r(Mb_df[SubjectID_AbMb, ],
+                      Antibody_df[SubjectID_AbMb, ],
+            method = "spearman",
+            p.adj.method = "none") %>% 
+  make_list_pheatmap -> Associate_AbMb_list
+
+Mb_df %>% 
+  names %>% 
+  data.frame(Variable = .,
+             Variable2 = .) %>% 
+  separate_var %>% 
+  mutate(Age = droplevels(Age)) %>% 
+  mutate(Variable = fct_relevel(Variable,
+                                "ObservedOTU", "Chao1", "Shannon")) %>% 
+  arrange(Age, Variable) %>% 
+  c2r("Variable2") -> Annotation_Row_df
+
+pheatmap(Associate_AbMb_list$cor[rownames(Annotation_Row_df), ],
+         display_numbers = Associate_AbMb_list$sd,
+         annotation_row = Annotation_Row_df[, -1, drop = FALSE],
+         fontsize_number = 14,
+         # cutree_rows = 7,
+         cluster_rows = FALSE,
+         cutree_cols = 5,
+         gaps_row = c(5, 10, 15, 20),
+         file = "Vaccine/Heatmap_Ab_Mb.png",
+         res = 300,
+         h = 6, w = 5.)
+```
+![](Vaccine/Heatmap_Ab_Mb.png)
+
+## Envfit: Genus
+```{R}
+set.seed(1202)
+
+Genus_tbl %>%
+  spread(Variable, Value) %>%
+  mutate(Age = droplevels(Age)) %>% 
+  split(., .$Age) %>% 
+  map(~ select(.x, -Age)) %>% 
+  map(~ c2r(., "SubjectID")) -> Genus_list
+
+map(Genus_list, function(df){
+  
+  intersect(rownames(Antibody_df),
+            rownames(df)) -> sampleid_mutual
+  
+  df[sampleid_mutual, ] %>% 
+  as.matrix %>% 
+  metaMDS(.,
+        distance = "bray") -> nmds
+
+envfit(nmds,
+       Antibody_df[sampleid_mutual, ],  
+       permutations = 999,
+       na.rm = TRUE)}) -> Envfit_Genus_list
+
+map(1:length(Envfit_Genus_list), function(i){
+  Envfit_Genus_list[[i]] -> envfit
+  
+  envfit %>% 
+    .$vectors -> vectorfit
+  
+    data.frame(P.value = vectorfit$pvals,
+               R2 = vectorfit$r,
+               Age_Feces = names(Envfit_Genus_list)[i]) %>% 
+      r2c("Variable")}) %>%
+  do.call(bind_rows, .) -> Envfit_Genus_tbw
+```
+
+```{R}
+Envfit_Genus_tbw %>% 
+  #mutate(Variable = gsub("@.*", "", Variable)) %>% 
+  #mutate(Variable = gsub("Nutritional:", "", Variable)) %>% 
+  dplyr::select(-P.value) %>% 
+  mutate(R2 = if_else(R2 == 0, 10^(-6), R2)) %>% 
+  mutate(R2 = log(R2, 10)) %>% 
+  spread(Variable, R2) %>% 
+  c2r("Age_Feces") -> Envfit_Genus_R2_df
+
+Envfit_Genus_tbw %>% 
+  dplyr::select(-R2) %>% 
+  mutate(P.value = add_sd(P.value)) %>% 
+  spread(Variable, P.value) %>% 
+  c2r("Age_Feces") -> Envfit_Genus_SD_df
+
+Envfit_Genus_SD_df[is.na(Envfit_Genus_SD_df)] <- ""
+
+pheatmap::pheatmap(Envfit_Genus_R2_df,
+                   display_numbers = Envfit_Genus_SD_df, 
+                   # annotation_col = Envfit_Category_df,
+                   fontsize_number = 14,
+                   file = "Vaccine/Heatmap_Envfit_Genus.png",
+                   cutree_cols = 6,
+                   na_col = "black",
+                   angle_col = 90,
+                   gaps_col = 5, 
+                   cluster_rows = FALSE,
+                   cluster_cols = FALSE,
+                   color = colorRampPalette(c("gray40",
+                                    "ivory", "orangered"))(100),
+                   res = 300, width= 3, height = 2.25)
+```
+![](Vaccine/Heatmap_Envfit_Genus.png)
+
+## Envfit: OTU
+```{R}
+set.seed(1202)
+
+OTU_tbl %>%
+  spread(Variable, Value) %>%
+  mutate(Age = droplevels(Age)) %>% 
+  split(., .$Age) %>% 
+  map(~ select(.x, -Age)) %>% 
+  map(~ c2r(., "SubjectID")) -> OTU_list
+
+map(OTU_list, function(df){
+  
+  intersect(rownames(Antibody_df),
+            rownames(df)) -> sampleid_mutual
+  
+  df[sampleid_mutual, ] %>% 
+  as.matrix %>% 
+  metaMDS(.,
+        distance = "bray") -> nmds
+
+envfit(nmds,
+       Antibody_df[sampleid_mutual, ],  
+       permutations = 999,
+       na.rm = TRUE)
+
+}) -> Envfit_OTU_list
+
+map(1:length(Envfit_OTU_list), function(i){
+  Envfit_OTU_list[[i]] -> envfit
+  
+  envfit %>% 
+    .$vectors -> vectorfit
+  
+    data.frame(P.value = vectorfit$pvals,
+               R2 = vectorfit$r,
+               Age_Feces = names(Envfit_OTU_list)[i]) %>% 
+      r2c("Variable")}) %>%
+  do.call(bind_rows, .) -> Envfit_OTU_tbw
+```
+
+
+```{R}
+Envfit_OTU_tbw %>% 
+  #mutate(Variable = gsub("@.*", "", Variable)) %>% 
+  #mutate(Variable = gsub("Nutritional:", "", Variable)) %>% 
+  dplyr::select(-P.value) %>% 
+  mutate(R2 = if_else(R2 == 0, 10^(-6), R2)) %>% 
+  mutate(R2 = log(R2, 10)) %>% 
+  spread(Variable, R2) %>% 
+  c2r("Age_Feces") -> Envfit_OTU_R2_df
+
+Envfit_OTU_tbw %>% 
+  dplyr::select(-R2) %>% 
+  mutate(P.value = add_sd(P.value)) %>% 
+  spread(Variable, P.value) %>% 
+  c2r("Age_Feces") -> Envfit_OTU_SD_df
+
+Envfit_OTU_SD_df[is.na(Envfit_OTU_SD_df)] <- ""
+
+pheatmap::pheatmap(Envfit_OTU_R2_df,
+                   display_numbers = Envfit_OTU_SD_df, 
+                   # annotation_col = Envfit_Category_df,
+                   fontsize_number = 14,
+                   file = "Vaccine/Heatmap_Envfit_OTU.png",
+                   cutree_cols = 6,
+                   na_col = "black",
+                   angle_col = 90,
+                   gaps_col = 5, 
+                   cluster_rows = FALSE,
+                   cluster_cols = FALSE,
+                   color = colorRampPalette(c("gray40",
+                                    "ivory", "orangered"))(100),
+                   res = 300, width= 3, height = 2.25)
+```
+![](Vaccine/Heatmap_Envfit_OTU.png)
+
+
+```{R}
+Envfit_tbw %>% 
+  separate_var %>% 
+  ggplot(., aes(x = Variable, y = P.value, fill = Variable))+
+  geom_jitter(color = "gray")+
+  geom_boxplot(outlier.shape = NA,
+              alpha = 0.8)+
+  scale_y_log10()
+```
+
+## Correlaiton genus vs titer
+```{R}
+map(1:length(Genus_list), function(i){
+  Genus_list[[i]] -> df
+  
+  associate_r(df,
+              Antibody_df,
+              method = "spearman",
+              p.adj.method = "none") %>% 
+    make_list_pheatmap -> list
+  
+  pheatmap(list$cor,
+         display_numbers = list$sd,
+         # annotation_row = Annotation_Row_df[, -1, drop = FALSE],
+         fontsize_number = 14,
+         # cutree_rows = 7,
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         cutree_cols = 5,
+         gaps_row = c(5, 10, 15, 20),
+         file = glue::glue("Vaccine/Heatmap_Ab_Genus_{names(Genus_list)[i]}.png"),
+         res = 300,
+         h = 50, w = 6)})
+
+
 ```
 
 
@@ -223,11 +459,6 @@ pheatmap(df %>% t,
 
 ## Enterotype
 ```{R}
-readr::read_csv("../RKcohort_DMM/CSV/Enterotype.csv") %>%
-  rename(Age_Enterotype = Age) %>% 
-  mutate(Enterotype = as.factor(Enterotype)) %>% 
-  mutate(Age_Enterotype = fct_relevel_age(Age_Enterotype)) -> Enterotype_tbl
-
 Antibody_tbl %>% 
   inner_join(Enterotype_tbl) %>% 
   filter(Age_Enterotype %in% c("1M", "1Y", "5Y", "7Y")) -> Antibody_Enterotype_tbl
