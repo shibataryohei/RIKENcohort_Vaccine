@@ -1,6 +1,6 @@
 ---
 title: "RIKEN: Vaccine"
-subtitle: "June 1st, 2022"
+subtitle: "June 6th, 2022"
 author: "Ryohei SHIBATA"
 output:
  powerpoint_presentation:
@@ -114,16 +114,17 @@ ggsave("Vaccine/Boxplot_Age_Titer.png",
 Positive_tbl %>% 
   group_by(Variable, Age, Value) %>% 
   summarise(Count = n()) %>% 
-  
+  mutate(Value = as.factor(Value)) %>% 
   ggplot(., aes(x = Age, y = Count, fill = Value))+
   geom_bar(stat = "identity", position = "fill")+
   facet_wrap(~ Variable)
 ggsave("Vaccine/Barplot_Age_Positive.png",
        dpi = 300, h = 2.5, w = 4)
 ```
+![](Vaccine/Barplot_Age_Positive.png)
 
-# Relationship with titer
-## Vaccination vs. Titer
+# Relationship with Antibody
+## Vaccination vs. Antibody
 ```{R}
 list(Vaccination = Vaccination_df,
      npMb = npMb_df,
@@ -152,31 +153,39 @@ associate_list$cor %>%
 
 list(c(3),
      c(0),
-     c(5, 10, 15, 20)) -> gaps_col_list
+     c(5, 10, 15, 20)) -> gaps_row_list
+
+associate_list$cor %>% 
+  names %>% 
+  data.frame(Variable = .) %>% 
+  mutate(Type = if_else(grepl("Hib", Variable), "Hib", "Sp")) %>% 
+  c2r("Variable") -> annotation_col
+  
 
 pheatmap(associate_list$cor,
          display_numbers = associate_list$sd,
+         annotation_col = annotation_col,
          fontsize_number = 14,
          #cutree_rows = 7,
          cluster_rows = FALSE,
          cluster_cols = FALSE,
          #cutree_cols = 5,
-         gaps_col = c(5, 10, 14, 18, 23), 
-         gaps_row = gaps_col_list[[i]],
+         gaps_col = c(5, 10, 14, 19, 24, 29, 33, 38), 
+         gaps_row = gaps_row_list[[i]],
          file = glue::glue("Vaccine/Heatmap_{names(Exposure_df_list)[i]}.png"),
          res = 300,
-         h = 2 + nrow * 0.15, w = 8)
+         h = 2 + nrow * 0.15, w = 10)
   })
 
 ```
-![](Vaccine/Heatmap_Vaccination.png)
+![Hibは接種回数の影響をほとんど受けない。Spは1歳の抗体価は影響が強い。FCで負の相関があるのは、1歳時の接種回数の影響。](Vaccine/Heatmap_Vaccination.png)
 
 
 ## Nasopharyngeal Mb vs. Titer
-![](Vaccine/Heatmap_npMb.png)
+![6M時?にStaph.を鼻腔に保菌していた方がHibの抗体価が高くなる。HibとSpの保菌率と抗体価はほぼ関係なさそう (ワクチンの効果)。](Vaccine/Heatmap_npMb.png)
 
-## Gut microbiota vs. Titer
-![](Vaccine/Heatmap_gutMb.png)
+## Gut microbiota overview vs. Antibody
+![1Wと1Mの腸内細菌と抗体価の関連はほぼなし。SpよりはHibの方が影響はありそう。その時の抗体と腸内細菌の関連は弱いながらもありそう。ただしかなり甘めの相関解析なのでこれだけでは厳しい。ObservedOTU, Chao1, Shannon: alpha diversity (多様性)。](Vaccine/Heatmap_gutMb.png)
 
 ## Envfit: Genus
 ```{R}
@@ -229,9 +238,7 @@ map(gutMb_list, function(tbl){
   do.call(bind_rows, .) %>% 
   mutate(Age_Feces = paste("Feces", Age_Feces, sep = "@")) %>% 
   mutate(Age_Feces = fct_relevel(Age_Feces,
-                                 "Feces@1W"))}) -> list
-
-list -> Envfit_Result_list
+                                 "Feces@1W"))}) ->  Envfit_Result_list
 ```
 
 
@@ -264,14 +271,14 @@ pheatmap::pheatmap(r2_df,
                    cutree_cols = 6,
                    na_col = "black",
                    angle_col = 90,
-                   gaps_col = c(5, 10, 14, 19, 24), 
+                   gaps_col = c(5, 10, 14, 19, 24, 29, 33, 38), 
                    cluster_rows = FALSE,
                    cluster_cols = FALSE,
                    color = colorRampPalette(c("gray40",
                                     "ivory", "orangered"))(100),
-                   res = 300, width= 6, height = 2.25)})
+                   res = 300, width= 7.25, height = 2.25)})
 ```
-![](Vaccine/Heatmap_Envfit_Genus.png)
+![有意差の多くは過去の抗体価の将来の腸内細菌への関連。](Vaccine/Heatmap_Envfit_Genus.png)
 
 ## Envfit: OTU
 ![](Vaccine/Heatmap_Envfit_OTU.png)
@@ -312,4 +319,64 @@ map(1:length(Genus_list), function(i){
          h = 1+length(variable_sd)*0.18,
          w = 3+nchar_sd*0.06)})
 ```
+# Clustering
+## Hib traject
+```{R}
+map(c("Hib", "Sp"), function(x){
 
+  map(2:5, function(i){
+   png::readPNG(glue::glue("kml3d/{x}_k{i}.png")) %>% 
+  as.raster %>% 
+    rasterGrob(., interpolate = FALSE)}) -> list
+  
+  gridExtra::marrangeGrob(list,
+                        nrow = 2, ncol = 2,
+                        top = NULL) -> gg
+  
+  ggsave(glue::glue("kml3d/{x}_k25.png"),
+       plot = gg,
+       dpi = 300,
+       width = 10, height = 9)
+})
+```
+
+```{R}
+map(c("Hib", "Sp"), function(x){
+
+  map(2:4, function(i){
+   png::readPNG(glue::glue("kml3d/{x}_k{i}.png")) %>% 
+  as.raster %>% 
+    rasterGrob(., interpolate = FALSE)}) -> list
+  
+  gridExtra::marrangeGrob(list,
+                        nrow = 1, ncol = 3,
+                        top = NULL) -> gg
+  
+  ggsave(glue::glue("kml3d/{x}_k24.png"),
+       plot = gg,
+       dpi = 300,
+       width = 13.5, height = 5)
+})
+```
+![Y-axis, log2-transformed titer; X-axis, Timepoint (1Y = 1.0, 2Y = 2.0, 5Y = 3.0, 7Y = 4.0).](kml3d/Hib_k24.png)
+
+## Sp traject
+![](kml3d/Sp_k24.png)
+
+## Hib + Sp traject
+```{R}
+map(2:4, function(i){
+  png::readPNG(glue::glue("kml3d/Both_k{i}.png")) %>% 
+  as.raster %>% 
+    rasterGrob(., interpolate = FALSE)}) -> list
+  
+  gridExtra::marrangeGrob(list,
+                        nrow = 1, ncol = 3,
+                        top = NULL) -> gg
+  
+  ggsave(glue::glue("kml3d/Both_k24.png"),
+       plot = gg,
+       dpi = 300,
+       width = 13.5, height = 6.5)
+```
+![V1, Hib; V2, Sp.](kml3d/Both_k24.png)
