@@ -25,10 +25,10 @@ options(scipen = 10)
 
 ```{R}
 # Packages
-source("~/Git/Database/Common/Library_Basic.R" )
-source("~/Git/Database/Common/Library_Bioinformatics.R")
-source("~/Git/Database/Common/Function.R")
-source("~/Git/Database/Common/Function_Mb.R")
+source("~/Git/Database/Library/Library_Basic.R" )
+source("~/Git/Database/Library/Library_Bioinformatics.R")
+source("~/Git/Database/Function/Function.R")
+source("~/Git/Database/Function/Function_GE.R")
 
 # source("~/Git/Database/RIKENcohort/RIKENcohort_Function.R")
 # source("~/Git/Database/RIKENcohort/RIKENcohort_Clinicaldata.R")
@@ -109,6 +109,7 @@ ggsave("Vaccine/Boxplot_Age_Titer.png",
 ```
 ![](Vaccine/Boxplot_Age_Titer.png)
 
+
 ## Positive
 ```{R}
 Positive_tbl %>% 
@@ -123,26 +124,28 @@ ggsave("Vaccine/Barplot_Age_Positive.png",
 ```
 ![](Vaccine/Barplot_Age_Positive.png)
 
-# Relationship with Antibody
-## Vaccination vs. Antibody
+# Correlation with Antibody
+## vs. Vaccination
 ```{R}
 list(Vaccination = Vaccination_df,
-     npMb = npMb_df,
-     gutMb = gutMb_df) -> Exposure_df_list
+     SkinNPMb = SkinNPMb_df,
+     GutMb = GutMb_df,
+     CR = Species_CR_df) -> Exposure_df_list
 ```
 
 
 ```{R}
-Exposure_df_list[[1]] -> df_ex
-
-map(1:3, function(i){
+Exposure_df_list[[2]] -> df_ex
+future_map(1:length(Exposure_df_list), function(i){
     Exposure_df_list[[i]] -> df_ex
     
     intersect(rownames(Antibody_df),
               rownames(df_ex)) -> subjectid_mutual
 
 associate_r(
-            df_ex[subjectid_mutual, ],
+            df_ex[subjectid_mutual, ] %>% 
+              mutate_all(as.character) %>% 
+              mutate_all(as.numeric),
             Antibody_df[subjectid_mutual, ],
             method = "spearman",
             p.adj.method = "none") %>% 
@@ -153,6 +156,7 @@ associate_list$cor %>%
 
 list(c(3),
      c(0),
+     c(5, 10, 15, 20),
      c(5, 10, 15, 20)) -> gaps_row_list
 
 associate_list$cor %>% 
@@ -170,38 +174,85 @@ pheatmap(associate_list$cor,
          cluster_rows = FALSE,
          cluster_cols = FALSE,
          #cutree_cols = 5,
-         gaps_col = c(5, 10, 14, 19, 24, 29, 33, 38), 
+         gaps_col = c(5, 10, 14, 18, 23, 28, 33, 37, 41, 46), 
          gaps_row = gaps_row_list[[i]],
          file = glue::glue("Vaccine/Heatmap_{names(Exposure_df_list)[i]}.png"),
          res = 300,
-         h = 2 + nrow * 0.15, w = 10)
+         h = 2 + nrow * 0.15, w = 12)
   })
-
 ```
 ![Hibは接種回数の影響をほとんど受けない。Spは1歳の抗体価は影響が強い。FCで負の相関があるのは、1歳時の接種回数の影響。](Vaccine/Heatmap_Vaccination.png)
 
 
-## Nasopharyngeal Mb vs. Titer
-![6M時?にStaph.を鼻腔に保菌していた方がHibの抗体価が高くなる。HibとSpの保菌率と抗体価はほぼ関係なさそう (ワクチンの効果)。](Vaccine/Heatmap_npMb.png)
+## vs. Nasopharyngeal Mb
+![6M時?にStaph.を鼻腔に保菌していた方がHibの抗体価が高くなる。HibとSpの保菌率と抗体価はほぼ関係なさそう (ワクチンの効果)。](Vaccine/Heatmap_SkinNPMb.png)
 
-## Gut microbiota overview vs. Antibody
-![1Wと1Mの腸内細菌と抗体価の関連はほぼなし。SpよりはHibの方が影響はありそう。その時の抗体と腸内細菌の関連は弱いながらもありそう。ただしかなり甘めの相関解析なのでこれだけでは厳しい。ObservedOTU, Chao1, Shannon: alpha diversity (多様性)。](Vaccine/Heatmap_gutMb.png)
+## vs. Gut microbiota overview
+![1Wと1Mの腸内細菌と抗体価の関連はほぼなし。SpよりはHibの方が影響はありそう。その時の抗体と腸内細菌の関連は弱いながらもありそう。ただしかなり甘めの相関解析なのでこれだけでは厳しい。ObservedOTU, Chao1, Shannon: alpha diversity (多様性)。](Vaccine/Heatmap_GutMb.png)
 
+## vs. Cross-reaction microbiota vs. Antibody
+![](Vaccine/Heatmap_CR.png)
+
+```{R}
+future_map(4, function(i){
+    Exposure_df_list[[i]] -> df_ex
+    
+    intersect(rownames(Antibody_df),
+              rownames(df_ex)) -> subjectid_mutual
+
+associate_r(
+            df_ex[subjectid_mutual, ],
+            Antibody_df[subjectid_mutual, ],
+            method = "spearman",
+            p.adj.method = "none") %>% 
+  make_list_pheatmap -> associate_list
+
+associate_list$cor %>% 
+  nrow -> nrow
+
+associate_list$cor %>% 
+  names %>% 
+  data.frame(Variable = .) %>% 
+  mutate(Type = if_else(grepl("Hib", Variable), "Hib", "Sp")) %>% 
+  c2r("Variable") -> annotation_col
+
+associate_list$cor %>% 
+  rownames %>% 
+  data.frame(Variable = .) %>% 
+  mutate(Type = if_else(grepl("Hib", Variable), "Hib", "Sp")) %>% 
+  c2r("Variable") -> annotation_col
+  
+pheatmap(associate_list$cor,
+         display_numbers = associate_list$sd,
+         annotation_col = annotation_col,
+         fontsize_number = 14,
+         cutree_rows = 4,
+         gaps_col = 19,
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         #cutree_cols = 5,
+         file = glue::glue("Vaccine/Heatmap_{names(Exposure_df_list)[i]}.png"),
+         res = 300,
+         h = 2 + nrow * 0.15, w = 10)
+  })
+```
+
+# Envfit with antibody
 ## Envfit: Genus
 ```{R}
 set.seed(1202)
 # list(Genus = Genus_tbl %>%
 #        filter_mb(., 0.2),
 #      OTU = OTU_tbl %>%
-#        filter_mb(., 0.2)) -> gutMb_list
+#        filter_mb(., 0.2)) -> GutMb_list
 
 list(Genus = Genus_tbl ,
-     OTU = OTU_tbl ) -> gutMb_list
+     OTU = OTU_tbl ) -> GutMb_list
 ```
 
 
 ```{R}
-map(gutMb_list, function(tbl){
+future_map(GutMb_list, function(tbl){
   
   tbl %>%
   spread(Variable, Value) %>%
@@ -243,7 +294,7 @@ map(gutMb_list, function(tbl){
 
 
 ```{R}
-map(1:2, function(i){
+future_map(1:2, function(i){
   Envfit_Result_list[[i]] -> tbw
   
   tbw %>% 
@@ -271,12 +322,12 @@ pheatmap::pheatmap(r2_df,
                    cutree_cols = 6,
                    na_col = "black",
                    angle_col = 90,
-                   gaps_col = c(5, 10, 14, 19, 24, 29, 33, 38), 
+                   gaps_col = c(5, 10, 14, 18, 23, 28, 33, 37, 41, 46), 
                    cluster_rows = FALSE,
                    cluster_cols = FALSE,
                    color = colorRampPalette(c("gray40",
                                     "ivory", "orangered"))(100),
-                   res = 300, width= 7.25, height = 2.25)})
+                   res = 300, width= 9, height = 2.25)})
 ```
 ![有意差の多くは過去の抗体価の将来の腸内細菌への関連。](Vaccine/Heatmap_Envfit_Genus.png)
 
@@ -285,13 +336,31 @@ pheatmap::pheatmap(r2_df,
 
 ## Correlaiton genus vs titer
 ```{R}
-map(1:length(Genus_list), function(i){
-  Genus_list[[i]] -> df
+Genus_tbl %>% 
+  mutate(Age = droplevels(Age)) %>% 
+  split(., .$Age) %>% 
+  future_map(., ~ filter_mb(.x, rate = 0.2)) %>% 
+  future_map(., ~ spread(.x, Variable, Value)) %>%  
+  future_map(., ~ select(.x, -Age)) %>%  
+  future_map(., ~ c2r(.x, "SubjectID")) -> Genus0.2_df_list
+
+names(Genus0.2_df_list) <- c("1W", "1M", "1Y", "5Y", "7Y")
+
+```
+```{R}
+i = 2
+# 1:length(Genus0.2_df_list)
+future_map(2, function(i){
+  
+  Genus0.2_df_list[[i]] -> df
   
   associate_r(df,
-              df_ex,
+              Antibody_df %>% 
+                select(matches("Titer@")) %>% 
+                select(-matches("UCB")),
               method = "spearman",
-              p.adj.method = "none") %>% 
+              p.adj.method = "fdr",
+              p.adj.threshold = 0.1) %>% 
     make_list_pheatmap -> list
   
   list$sd %>% 
@@ -313,12 +382,14 @@ map(1:length(Genus_list), function(i){
          # cutree_rows = 7,
          cluster_rows = FALSE,
          cluster_cols = FALSE,
-         gaps_col = 5,
+         gaps_col = 4,
          file = glue::glue("Vaccine/Heatmap_Ab_Genus_{names(Genus_list)[i]}.png"),
-         res = 300,
-         h = 1+length(variable_sd)*0.18,
-         w = 3+nchar_sd*0.06)})
+         res = 600,
+         h = 2+length(variable_sd)*0.18,
+         w = 4+nchar_sd*0.06)})
 ```
+* No significant Genus that were significantly correlated with titer (FDR-adjusted p value < 0.05)
+
 # Clustering
 ## Hib traject
 ```{R}
@@ -380,3 +451,331 @@ map(2:4, function(i){
        width = 13.5, height = 6.5)
 ```
 ![V1, Hib; V2, Sp.](kml3d/Both_k24.png)
+
+
+## Alluvium plot: Sp
+```{R}
+Titer_tbl %>% 
+  mutate(Value = log(Value, 2)) %>% 
+  filter(Variable == "Sp") %>% 
+  filter(Age != "UCB") %>% 
+  mutate(Mean = mean(Value),
+            SD = sd(Value),
+         `-2SD` = Mean-2*SD) %>% 
+  mutate(Group = if_else(Value > `-2SD`, "Normal", "Low")) %>%
+  select(SubjectID, Age, Group) %>% 
+  spread(Age, Group) %>% 
+  group_by(`1Y`, `2Y`, `5Y`, `7Y`) %>% 
+  summarise(Count = n()) %>% 
+  mutate_if(is.character, funs(fct_relevel(., "High"))) -> Sp_Alluvium_df
+  
+ggplot(Sp_Alluvium_df,
+       aes(y = Count,
+           axis1 = `1Y`,
+           axis2 = `2Y`,
+           axis3 = `5Y`,
+           axis4 = `7Y`)) +
+  geom_alluvium(aes(fill = `7Y`),
+                width = 1/12) +
+  geom_stratum(width = 2/12,
+               fill = "white",
+               color = "grey") +
+  geom_label(stat = "stratum",
+             size = 5,
+             aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("1Y", "2Y", "5Y", "7Y"),
+                   expand = c(.05, .05)) +
+  #scale_fill_manual(values = Colors_Endotype[1:5])+
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14))
+ggsave(glue::glue("Sp/Alluvium_Cluster.png"),
+       dpi = 300, h = 4.5, w = 6.2)
+```
+![<-2SDをlowと定義。](Sp/Alluvium_Cluster.png)
+
+## Alluvium plot: Hib
+```{R}
+Titer_tbl %>% 
+  mutate(Value = log(Value, 2)) %>% 
+  filter(Variable == "Hib") %>% 
+  filter(Age != "UCB") %>% 
+  mutate(Cutoff = log(1, 2)) %>% 
+  mutate(Group = if_else(Value > Cutoff, "Normal", "Low")) %>%
+  select(SubjectID, Age, Group) %>% 
+  spread(Age, Group) %>% 
+  group_by(`1Y`, `2Y`, `5Y`, `7Y`) -> Hib_Dichotomous_tbw
+
+names(Hib_Dichotomous_tbw)[2:5] <- 
+
+Hib_Dichotomous_tbw %>% 
+  summarise(Count = n()) %>% 
+  mutate_if(is.character, funs(fct_relevel(., "High"))) -> Hib_Alluvium_tbw
+  
+ggplot(Hib_Alluvium_tbw,
+       aes(y = Count,
+           axis1 = `1Y`,
+           axis2 = `2Y`,
+           axis3 = `5Y`,
+           axis4 = `7Y`)) +
+  geom_alluvium(aes(fill = `7Y`),
+                width = 1/12) +
+  geom_stratum(width = 2/12,
+               fill = "white",
+               color = "grey") +
+  geom_label(stat = "stratum",
+             size = 5,
+             aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("1Y", "2Y", "5Y", "7Y"),
+                   expand = c(.05, .05)) +
+  #scale_fill_manual(values = Colors_Endotype[1:5])+
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14))
+ggsave("Hib/Alluvium_Cluster.png",
+       dpi = 300, h = 4.5, w = 6.2)
+```
+![High vs. low at 1Y and 2Y was not associated with those at 5Y and 7Y.](Hib/Alluvium_Cluster.png)
+
+
+# Hib: low at 7Y
+## vs. Vaccination number
+```{R}
+Vaccination_tbl %>% 
+  filter(Variable == "Hib") %>% 
+  unite_var %>% 
+  spread(Variable, Value) %>% 
+  inner_join() %>% 
+  c2f -> Hib_LR_tbw
+
+Age_Ab <- c("1Y", "2Y", "5Y", "7Y")
+
+
+map(Age_Ab, function(i){
+  map(c("Hib@6M", "Hib@1Y", "Hib@2Y"), function(x){
+  
+  as.formula(glue("`{i}` ~ `{x}`")) -> formula
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term)) %>% 
+      mutate(Age = i)
+    
+  })}) %>% 
+  do.call(bind_rows, .) %>% 
+  tidy_table(.) %>% 
+  unite(Estimate, Estimate, `p-value`, sep = ", p = ") %>% 
+  spread(Age, Estimate) %>% 
+  table2png("Hib/Table_Dichotomous_Vaccination.png")
+```
+![Number of vaccination was not associated with high vs. low.](Hib/Table_Dichotomous_Vaccination.png)
+
+
+## Background: 
+```{R}
+Hib_LR_tbw %>% 
+  select(!matches("Hib")) %>% 
+  inner_join(Perinatal_tbw )%>% 
+  inner_join(Sibling_Pet_tbw) %>% 
+  inner_join(Antibiotics_tbw) %>% 
+  inner_join(HBM_tbw) %>% 
+  c2f %>% 
+  compare_background(.,
+                     group = "7Y",
+                     omit = "SubjectID",
+                     digits_con = 1,
+                     digits_cat = 0,
+                     show_all = FALSE) %>% 
+  arrange(P.value) %>% 
+  mutate(P.value = format_pvalue(P.value)) %>% 
+  table2png("Hib/Table_Background_Dichotomous.png")
+```
+![Tested by t.test and chi-squred.](Hib/Table_Background_Dichotomous.png)
+
+
+## Colonization of S.aureus at 1M
+```{R}
+SkinNPMb_df %>% 
+  r2c("SubjectID") %>% 
+  inner_join(Hib_Dichotomous_tbw) %>% 
+  select(-`Nasopharynx: Haemophilus influenzae@1M`) %>% 
+  mutate_if(grepl("Skin", names(.)), 
+            funs(if_else(. > 0, "1", "0"))) %>% 
+  mutate(`Staphylococcus aureus@1M` =
+           if_else(`Nasopharynx: Staphylococcus aureus@1M` == "1"|
+                     `Skin: Staphylococcus aureus@1M` == "1",
+         "1", "0")) %>% 
+  c2f -> Hib_LR_SkinNP_tbw 
+
+Hib_LR_SkinNP_tbw %>% 
+  select(matches("@")) %>% 
+  names -> Variable_SkinNP
+
+map(Variable_SkinNP, function(x){
+  
+  as.formula(glue("`7Y` ~ `{x}`")) -> formula
+  
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_SkinNP_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term))
+  }) %>% 
+  do.call(bind_rows, .) %>% 
+  tidy_table(.) 
+
+Hib_LR_SkinNP_tbw %>% 
+  group_by(`7Y`, `Staphylococcus aureus@1M`) %>% 
+  summarise(Count = n()) %>%
+  ggplot(., aes(x = `Staphylococcus aureus@1M`, y = Count, fill =`7Y`))+
+  geom_bar(stat = "identity", position = "fill")
+ggsave("Hib/Barplot_SA_Ratio.png",
+       dpi = 300,
+       h = 3, w = 3)
+```
+![Coloniation of S.aureus in skin or nasopharynx or gut.](Hib/Barplot_SA_Ratio.png)
+
+```{R}
+GutMb_Species_CR_tbw %>% 
+  mutate_if(grepl("Feces", names(.)), 
+            funs(if_else(. > 0, "1", "0"))) %>% 
+  select(SubjectID, matches("Feces")) %>% 
+  inner_join(Hib_Dichotomous_tbw) %>% 
+  select(!matches("pyogenes")) %>% 
+  c2f -> Hib_LR_Gut_tbw 
+
+Hib_LR_Gut_tbw %>% summary
+
+Hib_LR_Gut_tbw %>% 
+  select(matches("@")) %>% 
+  names -> Variable_Gut
+
+map(Variable_Gut, function(x){
+  
+  as.formula(glue("`7Y` ~ `{x}`")) -> formula
+  
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_Gut_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term))
+  }) %>% 
+  do.call(bind_rows, .) %>% 
+  tidy_table(.) 
+```
+
+```{R}
+GutMb_OTU_CR_tbw %>% 
+  mutate_if(grepl("OTU", names(.)), 
+            funs(if_else(. > 0, "1", "0"))) %>% 
+  select(SubjectID, matches("Feces")) %>% 
+  inner_join(Hib_Dichotomous_tbw) %>% 
+  c2f -> Hib_LR_OTU_tbw 
+
+Hib_LR_OTU_tbw %>% 
+  select(SubjectID, matches("Feces")) %>% 
+  gather(Variable, Value, - SubjectID) %>% 
+  mutate(Value = as.numeric(Value)) %>% 
+  group_by(Variable) %>% 
+  summarise(Value = sum(Value, na.rm = TRUE)) %>% 
+  filter(Value == 0) %>% 
+  .$Variable -> OTU_Omit_CR
+  
+
+Hib_LR_OTU_tbw %>% summary
+
+Hib_LR_OTU_tbw %>% 
+  select(matches("@")) %>% 
+  select(-OTU_Omit_CR) %>% 
+  names -> Variable_OTU
+
+map(Variable_OTU, function(x){
+  
+  as.formula(glue("`7Y` ~ `{x}`")) -> formula
+  
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_OTU_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term))
+  }) %>% 
+  do.call(bind_rows, .) %>% 
+  tidy_table(.) 
+```
+
+## Colonization of S.aureus
+```{R}
+# No Feces SA == 1 and skinNP SA == 0
+Hib_LR_SkinNP_tbw %>% 
+  select(SubjectID, matches("aureus@1M"), `7Y`) %>% 
+  inner_join(GutMb_Species_CR_tbw %>% 
+               select(SubjectID, matches("aureus@1M")) %>% 
+               mutate(`Feces: Staphylococcus aureus@1M` =
+                        if_else(`Feces: Staphylococcus aureus@1M`>0, "1", "0"))) %>% 
+  mutate(`Staphylococcus aureus@1M` = 
+           if_else(`Nasopharynx: Staphylococcus aureus@1M` == "1"|
+                     `Skin: Staphylococcus aureus@1M` == "1",
+                   "1", "0")) -> Hib_LR_SA_tbw
+
+Hib_LR_SA_tbw %>% 
+  select(matches("@")) %>% 
+  names -> Variable_SA
+
+map(Variable_SA, function(x){
+  
+  as.formula(glue("`7Y` ~ `{x}`")) -> formula
+  
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_SA_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term))
+  }) %>% 
+  do.call(bind_rows, .) %>% 
+  tidy_table(.) %>% 
+  .[c(1,2,4,3), ] %>% 
+  table2png("Hib/Table_Colonization_LR.png")
+```
+![](Hib/Table_Colonization_LR.png)
+
+## Enterotype
+```{R}
+Hib_Dichotomous_tbw %>% 
+  inner_join(Enterotype_tbl %>% 
+               unite(Variable, Variable_Feces, Age_Feces, sep = "@") %>% 
+               spread(Variable, Value_Feces)) %>% 
+  ungroup %>% 
+  
+  mutate_all(as.factor) %>% 
+  mutate(`Enterotype@1M` = fct_recode(`Enterotype@1M`,
+                                      "2" = "1")) %>% 
+  mutate(`Enterotype@1M` = fct_relevel(`Enterotype@1M`, "1")) %>% 
+  glm(`7Y` ~ `Enterotype@1M`,
+      family = "binomial"(link = "logit"),
+      data = .) %>% 
+  broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+  tidy_table(.) %>% 
+  table2png("Hib/Table_Low_Enterotype.png")
+```
+![](Hib/Table_Low_Enterotype.png)
