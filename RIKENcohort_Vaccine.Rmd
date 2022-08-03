@@ -187,6 +187,14 @@ pheatmap(associate_list$cor,
 ## Gut microbiota overview vs. Antibody
 ![1Wと1Mの腸内細菌と抗体価の関連はほぼなし。SpよりはHibの方が影響はありそう。その時の抗体と腸内細菌の関連は弱いながらもありそう。ただしかなり甘めの相関解析なのでこれだけでは厳しい。ObservedOTU, Chao1, Shannon: alpha diversity (多様性)。](Vaccine/Heatmap_gutMb.png)
 
+## Cross-reacted gut microbiota
+* Streptococcus pneumoniae (6, 15A, 29, 35A)
+* Escherichia coli (K100)
+* Staphylococcus aureus
+* Staphilococcus epidermidis
+* Streptococcus pyogenes
+* Enterococcus faecium
+
 ## Envfit: Genus
 ```{R}
 set.seed(1202)
