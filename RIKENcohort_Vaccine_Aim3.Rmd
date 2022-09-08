@@ -262,3 +262,18 @@ pheatmap::pheatmap(r2_df,
 
 ## Relative abundance in OTU level vs. Ab
 No significantly correlated OTU-level gut microbiota.
+
+# Staphylococcus
+```{R}
+NPMb_tbw %>% 
+  mutate_if(is.factor, funs(fct_relevel(., "1"))) %>% 
+  compare_background(.,
+                     group = "Staphylococcus aureus",
+                     omit = "SubjectID",
+                     digits_con = 1,
+                     digits_cat = 0,
+                     show_all = FALSE) %>% 
+  mutate(P.value = format_pvalue(P.value)) %>% 
+  table2png("Aim3/Table_SA_NpMb.png")
+```
+![](Aim3/Table_SA_NpMb.png)

@@ -83,8 +83,6 @@ Titer_tbl %>%
   spread(Age, Group) %>% 
   group_by(`1Y`, `2Y`, `5Y`, `7Y`) -> Hib_Dichotomous_tbw
 
-names(Hib_Dichotomous_tbw)[2:5] <- 
-
 Hib_Dichotomous_tbw %>% 
   summarise(Count = n()) %>% 
   mutate_if(is.character, funs(fct_relevel(., "High"))) -> Hib_Alluvium_tbw
@@ -184,3 +182,4 @@ pheatmap(list$cor,
          h = 2.25, w = 4.5)
 ```
 ![](Aim1/Heatmap_Vaccination_Hib.png)
+

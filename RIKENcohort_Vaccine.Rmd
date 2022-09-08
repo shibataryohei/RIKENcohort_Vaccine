@@ -25,10 +25,10 @@ options(scipen = 10)
 
 ```{R}
 # Packages
-source("~/Git/Database/Common/Library_Basic.R" )
-source("~/Git/Database/Common/Library_Bioinformatics.R")
-source("~/Git/Database/Common/Function.R")
-source("~/Git/Database/Common/Function_Mb.R")
+source("~/Git/Database/Library/Library_Basic.R" )
+source("~/Git/Database/Library/Library_Bioinformatics.R")
+source("~/Git/Database/Function/Function.R")
+source("~/Git/Database/Function/Function_Mb.R")
 
 # source("~/Git/Database/RIKENcohort/RIKENcohort_Function.R")
 # source("~/Git/Database/RIKENcohort/RIKENcohort_Clinicaldata.R")
