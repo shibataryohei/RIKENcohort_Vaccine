@@ -71,6 +71,36 @@ ggsave("Aim1/Pathplot_Age_Titer.png",
 ```
 ![](Aim1/Pathplot_Age_Titer.png)
 
+## Density plot (Sp)
+```{R}
+Titer_tbl %>% 
+  mutate(Age = fct_relevel(Age, "UCB")) %>% 
+  filter(Age != "UCB") %>% 
+  filter(Variable == "Sp") %>% 
+  ggplot(., aes(x = Value, fill = Age))+
+  geom_density(alpha = 0.3)+
+  labs(x = "Titer")+
+  scale_x_log10()
+ggsave("Aim1/Densityplot_Sp.png",
+       dpi = 300, h = 3, w = 4)
+
+```
+![](Aim1/Densityplot_Sp.png)
+
+## Path plot (Sp)
+```{R}
+TiterFC2Y_tbl %>% 
+  mutate(Value = log(Value, 2)) %>% 
+  filter(Variable == "Sp") %>% 
+  ggplot(., aes(x = Age, y = Value, group = SubjectID))+
+  geom_path()+
+  labs(y = "Log2 fold change of titer")
+ggsave("Aim1/Pathplot_Sp.png",
+       dpi = 300,
+       h = 3, w = 3)
+```
+![](Aim1/Pathplot_Sp.png)
+
 ## Figure: alluvium plot, Hib
 ```{R}
 Titer_tbl %>% 
@@ -181,5 +211,5 @@ pheatmap(list$cor,
          res = 600,
          h = 2.25, w = 4.5)
 ```
-![](Aim1/Heatmap_Vaccination_Hib.png)
+![](Aim1/Heatmap_Vaccination_Sp.png)
 

@@ -19,11 +19,14 @@ knitr::opts_chunk$set(echo = FALSE, # chunkを出力として表示するか否�
                       cache = FALSE ) 
 ```
 
+# Hib: low at 7Y
+
+## Clinical factors vs. Hib low at 7Y
 ```{R}
 Metadata_tbw %>% 
   select(SubjectID, Sibling,
-         `HBM@1W`, `HBM@1M`, `HBM@4M`,
-         Sex, Delivery, Preterm, LBW) %>% 
+         matches("HBM|Pet|Daycare"), 
+         Sex, Delivery, Preterm, LBW) %>%
   mutate_if(grepl("HBM", names(.)),
             funs(if_else(. == "Exclusive", "EBF",
                     "Not EBF"))) %>% 
@@ -36,8 +39,11 @@ Metadata_tbw %>%
   c2f %>% 
   mutate_all(funs(fct_relevel(., "-"))) %>% 
   ungroup %>% 
+  select(-`Daycare_Ever@6M`, -`HBM@6M`, -`HBM@9M`) %>% 
   mutate(`7Y` = if_else(`7Y` == "Low",
                         1, 0)) -> Metadata_Hib_tbw
+
+summary(Metadata_Hib_tbw)
 ```
 
 ```{R}
@@ -71,9 +77,6 @@ future_map(Exposures_Metadata, function(x){
 ![](Aim2/Table_Clinicaldata_Hib.png)
 
 
-
-
-# Hib: low at 7Y
 ## Association of #vaccination
 
 ```{R}

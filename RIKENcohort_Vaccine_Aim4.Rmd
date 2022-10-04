@@ -210,14 +210,18 @@ Hib_LR_SkinNP_tbw %>%
   mutate(`Staphylococcus aureus@1M` = 
            if_else(`Nasopharynx: Staphylococcus aureus@1M` == "1"|
                      `Skin: Staphylococcus aureus@1M` == "1",
-                   "1", "0")) -> Hib_LR_SA_tbw
+                   "1", "0")) %>% 
+  inner_join(Metadata_tbw %>%
+               select(SubjectID, Sibling, Sex, `HBM@1M`)) -> Hib_LR_SA_tbw
+
 
 Hib_LR_SA_tbw %>% 
   select(matches("@")) %>% 
   names -> Variable_SA
+```
 
+```{R}
 map(Variable_SA, function(x){
-  
   as.formula(glue("`7Y` ~ `{x}`")) -> formula
   
   glm(formula,
@@ -227,12 +231,28 @@ map(Variable_SA, function(x){
                       effects = "fixed",
                       conf.int = TRUE,
                       exponentiate = TRUE) %>% 
-      filter(!grepl("Intercept", term))
+      filter(grepl("Staphylococcus", term)) %>% 
+    mutate(Model = "Unadjusted") -> unadjusted_tbw
+  
+  as.formula(glue("`7Y` ~ `{x}` + Sibling + Sex")) -> formula
+  
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_SA_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(grepl("Staphylococcus", term)) %>% 
+    mutate(Model = "Adjusted") -> adjusted_tbw
+  
+  bind_rows(unadjusted_tbw,
+            adjusted_tbw)
   }) %>% 
   do.call(bind_rows, .) %>% 
-  tidy_table(.) %>% 
-  .[c(1,2,4,3), ] %>% 
+  tidy_table(.) %>%
+  .[, c(1,3,4,2)] %>% 
   table2png("Aim4/Table_Colonization_LR.png")
 ```
-![Logistic regression model.](Aim4/Table_Colonization_LR.png)
+![Logistic regression model. Adjusted by Sex and presence of older siblings.](Aim4/Table_Colonization_LR.png)
 
