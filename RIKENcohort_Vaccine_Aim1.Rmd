@@ -24,15 +24,7 @@ options(scipen = 10)
 
 
 ```{R}
-# Packages
-source("~/Git/Database/Library/Library_Basic.R" )
-source("~/Git/Database/Library/Library_Bioinformatics.R")
-source("~/Git/Database/Function/Function.R")
-source("~/Git/Database/Function/Function_GE.R")
-
-# source("~/Git/Database/RIKENcohort/RIKENcohort_Function.R")
-# source("~/Git/Database/RIKENcohort/RIKENcohort_Clinicaldata.R")
-# source("~/Git/Database/RIKENcohort/RIKENcohort_Vaccine.R")
+source("RIKENcohort-Vaccine_Setup.R")
 ```
 
 ```{R}
@@ -59,13 +51,16 @@ Titer_tbl %>%
   # geom_hline(yintercept = 1,
   #            color = "darkgray",
   #            linetype = "dashed")+
-  geom_line(color = "gray",
+  geom_line(color = "darkgray",
             aes(group = SubjectID))+
   # geom_boxplot(alpha = 0.8, outlier.shape = NA)+
   facet_wrap(~ Variable, scale = "free_y")+
   scale_y_log10()+
   labs(y = "Titer")+
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank())+
+  geom_hline(yintercept = 1,
+             linetype = "dashed",
+             color = "firebrick4")
 ggsave("Aim1/Pathplot_Age_Titer.png",
        dpi = 300, h = 2.5 , w = 5)
 ```
