@@ -54,19 +54,27 @@ Titer_tbl %>%
 ```{R}
 Titer_tbl %>% 
   mutate(Age = fct_relevel(Age, "UCB")) %>% 
+  
   filter(Age != "UCB") %>% 
+  mutate(Variable = fct_recode(Variable,
+                               "S.pneumoniae (U/mL)" = "Sp",
+                               "H.influenzae type B (µg/mL)" = "Hib")) %>% 
   ggplot(., aes(x = Age, y = Value, fill = Age))+
-  # geom_hline(yintercept = 1,
-  #            color = "darkgray",
-  #            linetype = "dashed")+
   geom_line(color = "gray",
             aes(group = SubjectID))+
+  geom_hline(yintercept = 1,
+             color = "firebrick3",
+             linetype = "dashed")+
   # geom_boxplot(alpha = 0.8, outlier.shape = NA)+
   facet_wrap(~ Variable, scale = "free_y")+
-  scale_y_log10()+
   labs(y = "Titer")+
-  theme(axis.title.x = element_blank())
-ggsave("Aim1/Pathplot_Age_Titer.png",
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 10),
+        axis.text = element_text(size = 10),
+        strip.text = element_text(size = 10))+
+  scale_y_log10()
+  
+ggsave("Aim1/Figure1.tiff",
        dpi = 300, h = 2.5 , w = 5)
 ```
 ![](Aim1/Pathplot_Age_Titer.png)
