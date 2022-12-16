@@ -24,15 +24,7 @@ options(scipen = 10)
 
 
 ```{R}
-# Packages
-source("~/Git/Database/Library/Library_Basic.R" )
-source("~/Git/Database/Library/Library_Bioinformatics.R")
-source("~/Git/Database/Function/Function.R")
-source("~/Git/Database/Function/Function_GE.R")
-
-# source("~/Git/Database/RIKENcohort/RIKENcohort_Function.R")
-# source("~/Git/Database/RIKENcohort/RIKENcohort_Clinicaldata.R")
-# source("~/Git/Database/RIKENcohort/RIKENcohort_Vaccine.R")
+source("RIKENcohort-Vaccine_Setup.R")
 ```
 
 ```{R}
@@ -60,24 +52,28 @@ Titer_tbl %>%
                                "S.pneumoniae (U/mL)" = "Sp",
                                "H.influenzae type B (µg/mL)" = "Hib")) %>% 
   ggplot(., aes(x = Age, y = Value, fill = Age))+
-  geom_line(color = "gray",
+  geom_line(color = "darkgray",
             aes(group = SubjectID))+
   geom_hline(yintercept = 1,
              color = "firebrick3",
              linetype = "dashed")+
-  # geom_boxplot(alpha = 0.8, outlier.shape = NA)+
   facet_wrap(~ Variable, scale = "free_y")+
   labs(y = "Titer")+
   theme(axis.title.x = element_blank(),
         axis.title.y = element_text(size = 10),
         axis.text = element_text(size = 10),
         strip.text = element_text(size = 10))+
-  scale_y_log10()
-  
-ggsave("Aim1/Figure1.tiff",
-       dpi = 300, h = 2.5 , w = 5)
+  scale_y_log10()+
+  theme(axis.title.x = element_blank())+
+  geom_hline(yintercept = 1,
+             linetype = "dashed",
+             color = "firebrick4") -> Fig1A_gg
+
+ggsave("Aim1/Figure1A.tiff",
+       plot = Fig1A_gg,
+       dpi = 300, h = 2.75 , w = 5.25)
 ```
-![](Aim1/Pathplot_Age_Titer.png)
+![](Aim1/Figure1A.tiff)
 
 ## Density plot (Sp)
 ```{R}
@@ -91,7 +87,6 @@ Titer_tbl %>%
   scale_x_log10()
 ggsave("Aim1/Densityplot_Sp.png",
        dpi = 300, h = 3, w = 4)
-
 ```
 ![](Aim1/Densityplot_Sp.png)
 
@@ -137,19 +132,35 @@ ggplot(Hib_Alluvium_tbw,
                fill = "white",
                color = "grey") +
   geom_label(stat = "stratum",
-             size = 5,
+             size = 4,
              aes(label = after_stat(stratum))) +
   scale_x_discrete(limits = c("1Y", "2Y", "5Y", "7Y"),
-                   expand = c(.05, .05)) +
+                   expand = c(0.1, .05)) +
   #scale_fill_manual(values = Colors_Endotype[1:5])+
-  theme(axis.text = element_text(size = 14),
-        axis.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 14))
-ggsave("Aim1/Alluvium_Cluster.png",
-       dpi = 300, h = 4.5, w = 6.2)
+  theme(axis.text = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10))+
+  labs(fill = "Hib titer\nat 7Y") -> Fig1B_gg
+ggsave("Aim1/Figure1B.tiff",
+       plot = Fig1B_gg,
+       dpi = 300, h = 4, w = 6)
 ```
 ![](Aim1/Alluvium_Cluster.png)
+
+## Figure 1
+```{R}
+ggpubr::ggarrange(plotlist = list(Fig1A_gg,
+                                  Fig1B_gg),
+                          labels = c("A.", "B."),
+                  nrow = 2,
+                  heights = c(0.75, 1),
+                  widths = c(0.75, 1)) %>% 
+ggsave("Aim1/Figure1.tiff",
+       plot = .,
+       dpi = 600, 
+       h = 6, w = 5)
+```
 
 ## Figure: #vaccination vs. antibody
 ```{R}
