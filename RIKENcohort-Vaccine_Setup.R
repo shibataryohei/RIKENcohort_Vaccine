@@ -9,5 +9,6 @@ source("~/Git/Database/Function/Function_GE.R")
 source("~/Git/Database/RIKENcohort/RIKENcohort_Function.R")
 
 source("~/Git/Database/RIKENcohort/RIKENcohort_Skin.R")
-source("~/Git/Database/RKcohort/RKcohort_Clinicaldata.R")
+
 source("~/Git/Database/RIKENcohort/RIKENcohort_Vaccine.R")
+source("~/Git/Database/RKcohort/RKcohort_Clinicaldata.R")
