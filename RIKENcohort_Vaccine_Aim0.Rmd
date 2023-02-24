@@ -33,7 +33,35 @@ Titer_tbl %>%
   summarise() %>% 
   .$SubjectID -> SubjectID_Analysis
 
+Dictionary_tbw %>% 
+  .$Variable_R -> Clinicaldata_Dictionary
+
 Clinicaldata_tbw %>% 
+  
+  select(SubjectID, Clinicaldata_Dictionary) %>% 
+  mutate(Gestation_Week = if_else(Gestation_Week < 37, "+", "-")) %>% 
+  mutate(BirthBW = if_else(BirthBW < 2500, "+", "-")) %>% 
+  mutate(Hospital = fct_relevel(Hospital, "CUH")) %>% 
+  c2f %>% 
+  mutate_if(is.factor, fct_relevel_plus) %>% 
+  mutate_if(is.factor, fct_relevel_hbm) %>% 
+    mutate(Sibling = as.factor(Sibling)) -> tbw
+
+Dictionary_tbw %>% 
+  .$Variable_Table -> names(tbw)[-1] 
+
+tbw %>% 
+  mutate(Cohort = if_else(SubjectID %in% SubjectID_Analysis,
+                          "Analytic cohort", "Non-analytic cohort")) %>% 
+  c2f %>% 
+  summarise_background(data = .,
+                       omit = "SubjectID",
+                       digits_con = 1,
+                       digits_cat = 0,
+                       show_levels = TRUE) %>% 
+  filter(!grepl("-|CMC|Analytic cohort", Variables)) -> Cohort_Overall_tbw
+
+tbw %>% 
   mutate(Cohort = if_else(SubjectID %in% SubjectID_Analysis,
                           "Analytic cohort", "Non-analytic cohort")) %>% 
   c2f %>% 
@@ -43,7 +71,20 @@ Clinicaldata_tbw %>%
                      digits_con = 1,
                      digits_cat = 0,
                      show_all = FALSE,
-                     multi_level = "Hospital") -> Cohort_table
+                     multi_level = c("The number of older siblings",
+                                     "Breastfeeding at 1W",
+                                     "Breastfeeding at 1M",
+                                     "Breastfeeding at 4M")) %>% 
+  inner_join(Cohort_Overall_tbw, .) %>% 
+  mutate(P.value = format_pvalue(P.value)) -> Cohort_RAW_table
+
+Cohort_RAW_table %>% 
+  mutate(Variable_Table = gsub("\\ \\[.*\\]", "", Variables)) %>% 
+  inner_join(Dictionary_tbw) %>% 
+  mutate(Variables = fct_reorder(Variables, Number)) %>% 
+  arrange(Variables) %>% 
+  select(-Number, -Variable_R, -Variable_Table) %>%
+  mutate(Variables = gsub("\\ \\[\\+\\]|\\ \\[\\CUH\\]|\\ \\[\\Female\\]", "", Variables)) -> Cohort_table
 
 sjPlot::tab_df(Cohort_table,
                col.header = names(Cohort_table),

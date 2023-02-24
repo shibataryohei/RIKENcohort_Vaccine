@@ -23,7 +23,19 @@ Cohort_tbw %>%
   inner_join(SolidFood_tbw) %>% 
   inner_join(HBM_tbw) %>% 
   inner_join(Sibling_Pet_tbw) %>% 
-  inner_join(Daycare_tbw) -> Clinicaldata_tbw
+  inner_join(Daycare_tbw) %>% 
+  c2f -> Clinicaldata_tbw
+
+# Clinicaldata_tbw %>% 
+#   names %>% 
+#   data.frame(Variable_R = .,
+#              Variable_Table = NA) %>% 
+#   write_csv(.,
+#             "/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Dictionary.csv")
+
+read_excel("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Dictionary_RIKENcohort-Vaccine.xlsx") %>% 
+  filter(!is.na(Number)) %>% 
+  select(Number, Variable_R, Variable_Table) -> Dictionary_tbw
   
   
   
