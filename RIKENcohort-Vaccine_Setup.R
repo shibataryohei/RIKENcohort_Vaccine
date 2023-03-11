@@ -38,4 +38,3 @@ read_excel("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Dictiona
   select(Number, Variable_R, Variable_Table) -> Dictionary_tbw
   
   
-  
