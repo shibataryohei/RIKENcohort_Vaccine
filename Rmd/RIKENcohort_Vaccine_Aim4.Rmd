@@ -1,0 +1,155 @@
+---
+title: "RIKEN-Vaccine: Aim4"
+subtitle: "August 6th, 2022"
+author: "Ryohei SHIBATA"
+output:
+ powerpoint_presentation:
+  slide_level: 2 # use this to override default
+  reference_doc: ~/Git/R/Template_ENW.pptx
+---
+
+
+```{r ChunkOption, include = FALSE, warning = FALSE}
+# chunk option
+knitr::opts_chunk$set(echo = FALSE, # chunkを出力として表示するか否か
+                      eval = FALSE, # chunkを実際にRのコードとして評価するか否か
+                      warning = FALSE, # chunkに対する警告を表示させるか否か
+                      message = FALSE, # chunkに対するエラーを表示させるか否か
+                      comment = "", # 計算結果の頭につく文字
+                      cache = FALSE ) 
+
+Sys.setlocale("LC_ALL", 'UTF-8')
+options(scipen = 10)
+```
+
+
+```{R}
+source("RIKENcohort-Vaccine_Setup.R")
+```
+
+
+##  Association of S.aureus (Unadjusted)
+```{R}
+# No Feces SA == 1 and skinNP SA == 0
+Hib_LR_SkinNP_tbw %>% 
+  select(SubjectID, matches("aureus@1M"), `7Y`) %>% 
+  inner_join(GutMb_Species_CR_tbw %>% 
+               select(SubjectID, matches("aureus@1M")) %>% 
+               mutate(`Feces: Staphylococcus aureus@1M` =
+                        if_else(`Feces: Staphylococcus aureus@1M`>0, "1", "0"))) %>% 
+  mutate(`Staphylococcus aureus@1M` = 
+           if_else(`Nasopharynx: Staphylococcus aureus@1M` == "1"|
+                     `Skin: Staphylococcus aureus@1M` == "1",
+                   "1", "0")) %>% 
+  inner_join(Metadata_tbw %>%
+               select(SubjectID, Sibling, Sex, `HBM@1M`)) -> Hib_LR_SA_tbw
+
+
+Hib_LR_SA_tbw %>% 
+  select(matches("@")) %>% 
+  names -> Variable_SA
+```
+
+```{R}
+map(Variable_SA, function(x){
+  as.formula(glue("`7Y` ~ `{x}`")) -> formula
+  
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_SA_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(grepl("Staphylococcus", term)) %>% 
+    mutate(Model = "Unadjusted") -> unadjusted_tbw
+  
+  as.formula(glue("`7Y` ~ `{x}` + Sibling + Sex")) -> formula
+  
+  glm(formula, d
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_SA_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(grepl("Staphylococcus", term)) %>% 
+    mutate(Model = "Adjusted*") -> adjusted_tbw
+  
+  bind_rows(unadjusted_tbw,
+            adjusted_tbw)
+  }) %>% 
+  do.call(bind_rows, .) -> res_tbw
+
+res_tbw %>% 
+  tidy_table() %>% 
+  inner_join(res_tbw %>% 
+               rename(Variable = term) %>% 
+               select(Variable, estimate, conf.low, conf.high, Model)) %>% 
+  mutate(Variable = gsub("`Staphylococcus aureus@1M`1", "Any site", Variable)) %>% 
+  mutate(Variable = gsub("`|\\:\\ Staphylococcus aureus@1M`1", "", Variable)) %>% 
+  .[c(3,4,1,2,7,8,5,6), c(1,3,4,2, 5,6,7)] %>% 
+  mutate(Variable = if_else(Model == "Adjusted*", "", Variable)) -> forest_tbw
+```
+
+```{R}
+list(Variable = c(list(expression(bold("Variable"))),
+                     forest_tbw$Variable),
+     Model = c(list(expression(bold("Model"))),
+                     forest_tbw$Model),
+     `Odds ratio (95% CI)` = c(list(expression(bold("Odds ratio (95% CI)"))),
+                               forest_tbw$Estimate),
+     `P value` = c(list(expression(bold("P value"))),
+                   forest_tbw$`p-value`)) -> forest_list
+```
+```{R}
+library(extrafont)
+library(forestplot)
+
+tiff("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure4.tiff",
+      height = 1700,
+      width = 3200,
+      res = 600)
+forestplot::forestplot(labeltext = forest_list,
+           xticks =  c(log(0.5), 0, log(10), log(20)), # range of x axis
+           xticks.digits = 0,
+           
+           xlab = expression(bold("Odds ratio (95% CI)")),
+           
+           hrzl_lines = list("2" = gpar(lwd = 1, # line (band) width
+                        				    lineend = "butt", # shape of line end
+                        				    col = "black"),#,
+                             "5" = gpar(lwd = 35, # line (band) width
+                        				    lineend = "butt", # shape of line e
+                        				    col = "#99999922"),
+                             "9" = gpar(lwd = 35, # line (band) width
+                        				    lineend = "butt", # shape of line end
+                        				    col = "#99999922")
+                             ), # color
+           
+           txt_gp = fpTxtGp(label = # text setting 
+                              list(gpar(cex = 0.8,
+                                        fontfamily = "sans")),
+                              ticks = gpar(cex = 0.8),
+                              xlab = gpar(cex = 0.8),
+                              title = gpar(cex = 1)),
+           
+           col = fpColors(lines = "black", # line of color 
+                          zero = "gray50"),
+           zero = 1,
+           cex = 1.3,
+           
+           lineheight = unit(6,"mm"), # line interval
+           graph.pos = 3, # col number of forest plot
+           xlog = TRUE,
+           boxsize = 0.30,
+           colgap = unit(2, "mm"),
+           lwd.zero = 1, # line strong
+           ci.vertices = TRUE,
+           ci.vertices.height = 0.2 ,
+           mean = c(NA,  forest_tbw$estimate),
+           lower = c(NA, forest_tbw$conf.low),
+           upper = c(NA, forest_tbw$conf.high))
+dev.off()
+```
+![](Aim2/Table_Clinicaldata_Hib.png)

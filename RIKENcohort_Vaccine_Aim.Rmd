@@ -1,0 +1,531 @@
+---
+title: "RIKEN-Vaccine: Aim"
+subtitle: "August 6th, 2022"
+author: "Ryohei SHIBATA"
+output:
+ powerpoint_presentation:
+  slide_level: 2 # use this to override default
+  reference_doc: ~/Git/R/Template_ENW.pptx
+---
+
+
+```{r ChunkOption, include = FALSE, warning = FALSE}
+# chunk option
+knitr::opts_chunk$set(echo = FALSE, # chunkを出力として表示するか否か
+                      eval = FALSE, # chunkを実際にRのコードとして評価するか否か
+                      warning = FALSE, # chunkに対する警告を表示させるか否か
+                      message = FALSE, # chunkに対するエラーを表示させるか否か
+                      comment = "", # 計算結果の頭につく文字
+                      cache = FALSE ) 
+
+Sys.setlocale("LC_ALL", 'UTF-8')
+options(scipen = 10)
+```
+
+
+```{R}
+source("RIKENcohort-Vaccine_Setup.R")
+```
+
+# Aim0
+## Cohorts
+```{R}
+Titer_tbl %>% 
+  group_by(SubjectID) %>% 
+  summarise() %>% 
+  .$SubjectID -> SubjectID_Analysis
+
+Dictionary_tbw %>% 
+  .$Variable_R -> Clinicaldata_Dictionary
+
+Clinicaldata_tbw %>% 
+  
+  select(SubjectID, Clinicaldata_Dictionary) %>% 
+  mutate(Gestation_Week = if_else(Gestation_Week < 37, "+", "-")) %>% 
+  mutate(BirthBW = if_else(BirthBW < 2500, "+", "-")) %>% 
+  mutate(Hospital = fct_relevel(Hospital, "CUH")) %>% 
+  c2f %>% 
+  mutate_if(is.factor, fct_relevel_plus) %>% 
+  mutate_if(is.factor, fct_relevel_hbm) %>% 
+    mutate(Sibling = as.factor(Sibling)) -> tbw
+
+Dictionary_tbw %>% 
+  .$Variable_Table -> names(tbw)[-1] 
+
+tbw %>% 
+  mutate(Cohort = if_else(SubjectID %in% SubjectID_Analysis,
+                          "Analytic cohort", "Non-analytic cohort")) %>% 
+  c2f %>% 
+  summarise_background(data = .,
+                       omit = "SubjectID",
+                       digits_con = 1,
+                       digits_cat = 0,
+                       show_levels = TRUE) %>% 
+  filter(!grepl("-|CMC|Analytic cohort", Variables)) -> Cohort_Overall_tbw
+
+tbw %>% 
+  mutate(Cohort = if_else(SubjectID %in% SubjectID_Analysis,
+                          "Analytic cohort", "Non-analytic cohort")) %>% 
+  c2f %>% 
+  compare_background(data = .,
+                     group = "Cohort",
+                     omit = "SubjectID",
+                     digits_con = 1,
+                     digits_cat = 0,
+                     show_all = FALSE,
+                     multi_level = c("The number of older siblings",
+                                     "Breastfeeding at 1W",
+                                     "Breastfeeding at 1M",
+                                     "Breastfeeding at 4M")) %>% 
+  inner_join(Cohort_Overall_tbw, .) %>% 
+  mutate(P.value = format_pvalue(P.value)) -> Cohort_RAW_table
+
+Cohort_RAW_table %>% 
+  mutate(Variable_Table = gsub("\\ \\[.*\\]", "", Variables)) %>% 
+  inner_join(Dictionary_tbw) %>% 
+  mutate(Variables = fct_reorder(Variables, Number)) %>% 
+  arrange(Variables) %>% 
+  select(-Number, -Variable_R, -Variable_Table) %>%
+  mutate(Variables = gsub("\\ \\[\\+\\]|\\ \\[\\CUH\\]|\\ \\[\\Female\\]", "", Variables)) -> Cohort_table
+
+sjPlot::tab_df(Cohort_table,
+               col.header = names(Cohort_table),
+               file = "Aim0/Table_Cohort.doc")
+
+table2png(Cohort_table, "Aim0/Table_Cohort.png")
+```
+![](Aim0/Table_Cohort.png)
+
+# Aim1
+## Figure1A: pathplot
+```{R}
+Titer_tbl %>% 
+  mutate(Age = fct_relevel(Age, "UCB")) %>% 
+  
+  filter(Age != "UCB") %>% 
+  mutate(Variable = fct_recode(Variable,
+                               "S. pneumoniae (U/mL)" = "Sp",
+                               "H. influenzae type B (µg/mL)" = "Hib")) %>% 
+  ggplot(., aes(x = Age, y = Value, fill = Age))+
+  geom_line(color = "darkgray",
+            aes(group = SubjectID))+
+  geom_hline(yintercept = 1,
+             color = "firebrick3",
+             linetype = "dashed")+
+  facet_wrap(~ Variable, scale = "free_y")+
+  labs(y = "Titer")+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 10),
+        axis.text = element_text(size = 10),
+        strip.text = element_text(size = 10))+
+  scale_y_log10()+
+  theme(axis.title.x = element_blank())+
+  geom_hline(yintercept = 1,
+             linetype = "dashed",
+             color = "firebrick4") -> Fig1A_gg
+
+ggsave("Aim1/Figure1A.tiff",
+       plot = Fig1A_gg,
+       dpi = 300, h = 2.75 , w = 5.25)
+```
+![](Aim1/Figure1A.tiff)
+
+## Density plot (Sp)
+```{R}
+Titer_tbl %>% 
+  mutate(Age = fct_relevel(Age, "UCB")) %>% 
+  filter(Age != "UCB") %>% 
+  filter(Variable == "Sp") %>% 
+  ggplot(., aes(x = Value, fill = Age))+
+  geom_density(alpha = 0.3)+
+  labs(x = "Titer")+
+  scale_x_log10()
+ggsave("Aim1/Densityplot_Sp.png",
+       dpi = 300, h = 3, w = 4)
+```
+![](Aim1/Densityplot_Sp.png)
+
+## Figure1B: alluvium plot, Hib
+```{R}
+Titer_tbl %>% 
+  mutate(Value = log(Value, 2)) %>% 
+  filter(Variable == "Hib") %>% 
+  filter(Age != "UCB") %>% 
+  mutate(Cutoff = log(1, 2)) %>% 
+  mutate(Group = if_else(Value > Cutoff, "≥1.0", "<1.0")) %>%
+  select(SubjectID, Age, Group) %>% 
+  spread(Age, Group) %>% 
+  group_by(`1Y`, `2Y`, `5Y`, `7Y`) -> Hib_Dichotomous_tbw
+
+Hib_Dichotomous_tbw %>% 
+  summarise(Count = n()) %>% 
+  mutate_if(is.character, funs(fct_relevel(., "≥1.0"))) -> Hib_Alluvium_tbw
+  
+ggplot(Hib_Alluvium_tbw,
+       aes(y = Count,
+           axis1 = `1Y`,
+           axis2 = `2Y`,
+           axis3 = `5Y`,
+           axis4 = `7Y`)) +
+  geom_alluvium(aes(fill = `7Y`),
+                width = 1/12) +
+  geom_stratum(width = 2/12,
+               fill = "white",
+               color = "grey") +
+  geom_label(stat = "stratum",
+             size = 3.5,
+             aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("1Y", "2Y", "5Y", "7Y"),
+                   expand = c(0.1, .05)) +
+  #scale_fill_manual(values = Colors_Endotype[1:5])+
+  theme(axis.text = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10))+
+  labs(fill = "Long-term protective titer") +
+  scale_fill_brewer(palette = "Set2",labels = c("+", "-")) -> Fig1B_gg
+ggsave("Aim1/Figure1B.tiff",
+       plot = Fig1B_gg,
+       dpi = 300, h = 4, w = 5)
+```
+![](Aim1/Figure1B.tiff)
+
+## Figure1
+```{R}
+ggpubr::ggarrange(plotlist = list(Fig1A_gg,
+                                  Fig1B_gg),
+                          labels = c("A.", "B."),
+                  nrow = 2,
+                  heights = c(0.85, 1),
+                  widths = c(0.85, 1)) %>% 
+ggsave("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure1.tiff",
+       plot = .,
+       dpi = 600, 
+       h = 5.5, w = 5)
+```
+![](/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure1.tiff)
+
+# Aim2
+## Figure2, forest plot
+```{R}
+Vaccination_tbl %>% 
+  mutate(Value = case_when(Age == "6M"&Value < 3|Age == "6M"&is.na(Value) ~ "-",
+                           Age == "6M"&Value >= 3 ~ "+",
+                           Age == "1Y"&Value < 3 ~ "-",
+                           Age == "1Y"&Value >= 3 ~ "+",
+                           Age == "2Y"&Value < 4 ~ "-",
+                           Age == "2Y"&Value >= 3 ~ "+")) %>%
+  filter(Variable == "Hib") %>% 
+  mutate(Variable = case_when(Age == "6M" ~ "Vaccination 3 doses by 6M",
+                              Age == "1Y" ~ "Vaccination 4 doses by 1Y",
+                              Age == "2Y" ~ "Vaccination 4 doses by 2Y")) %>% 
+  select(-Age) %>% 
+               spread(Variable, Value) %>% 
+  c2f  -> Vaccination_Dichotomous_tbw
+```
+
+
+```{R}
+Metadata_tbw %>% 
+  select(SubjectID, Sibling,
+         matches("HBM|Pet|Daycare"), 
+         Sex, Delivery, Preterm, LBW) %>%
+  mutate_if(grepl("HBM", names(.)),
+            funs(if_else(. %in% c("Exclusive", "Almost"),
+                         "EBF",
+                    "Not EBF"))) %>% 
+  mutate_if(grepl("HBM", names(.)),
+            funs(fct_relevel(., "Not EBF"))) %>% 
+  c2f %>% 
+  inner_join(Hib_Dichotomous_tbw %>%
+               ungroup %>% 
+               select(SubjectID, `7Y`), .) %>% 
+  c2f %>% 
+  mutate_all(funs(fct_relevel(., "-"))) %>% 
+  ungroup %>% 
+  select(-`HBM@6M`,
+         -`Daycare_Ever@6M`, 
+         -`HBM@9M`) %>% 
+  mutate(`7Y` = if_else(`7Y` == "Low",
+                        1, 0)) %>% 
+  inner_join(Vaccination_Dichotomous_tbw %>% 
+               select(!matches("Sp"))) -> Metadata_Hib_tbw
+```
+
+```{R}
+Metadata_Hib_tbw %>% 
+  names %>% 
+  .[-1:-2] %>% 
+  .[!grepl("Siblings_Daycare|Preterm|LBW", .)]-> Exposures_Metadata
+
+Exposures_Metadata[1] -> x
+
+future_map(Exposures_Metadata, function(x){
+  
+  Metadata_Hib_tbw %>% 
+    .[, c("7Y", x)] -> tbw
+  
+  glue("`7Y` ~ `{x}`") %>% 
+    as.formula -> formula
+  
+  glm(formula,
+      family = binomial(link = "logit"),
+      data = tbw) %>% 
+    broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+    filter(term != "(Intercept)")
+}) %>% 
+  do.call(bind_rows, .) -> res_tbw
+```
+
+
+```{R}
+
+res_tbw %>% 
+  tidy_table() %>% 
+  inner_join(res_tbw %>% 
+               rename(Variable = term) %>% 
+               select(Variable, estimate, conf.low, conf.high)) %>% 
+  rename(`Odds ratio` = Estimate,
+         `P value` = `p-value`) %>% 
+  mutate(Variable = gsub("`|EBF|\\+|VD|Male", "", Variable)) %>% 
+  left_join(.,
+            Dictionary_tbw %>% 
+               rename(Variable = Variable_R)) %>% 
+  mutate(Variable = if_else(grepl("doses", Variable),
+                            Variable,
+                            Variable_Table)) %>% 
+  mutate(Number = case_when(Variable == "Vaccination 4 doses by 1Y" ~ 92,
+                            Variable == "Vaccination 4 doses by 2Y" ~ 93,
+                            Variable == "Vaccination 3 doses by 6M" ~ 91,
+                            !grepl("Number of", Variable) ~ Number)) %>% 
+  arrange(Number) %>% 
+  select(-Number, -Variable_Table) %>%
+  mutate(Variable = if_else(grepl("Breastfeeding", Variable),
+                            gsub("Breastfeeding", "(Almost) exclusive breastfeeding", Variable),
+                            paste(Variable))) %>% 
+  rename(`Odds ratio (95% CI)` = `Odds ratio`) -> forest_tbw
+
+forest_tbw %>% 
+  colnames %>% 
+  data.frame(Variable = .) %>% 
+  mutate(Value = NA) %>% 
+  spread(Variable, Value) %>% 
+  mutate_if(grepl("conf|estimate", names(.)), funs(as.numeric)) %>% 
+  mutate_if(!grepl("conf|estimate", names(.)), funs(as.character)) -> blank_tbw
+
+bind_rows(forest_tbw[1:3, ],
+          
+          blank_tbw %>% mutate(Variable = "(Almost) exclusive breastfeeding"),
+          forest_tbw[4:6, ] %>% 
+            mutate(Variable = gsub("\\(Almost\\) exclusive breastfeeding", "    ", Variable)),
+          
+          blank_tbw %>% mutate(Variable = "Ever attended daycare"),
+          forest_tbw[7:8, ] %>% 
+            mutate(Variable = gsub("Ever attended daycare", "    ", Variable)),
+          
+           blank_tbw %>% mutate(Variable = "Presence of furry pet"),
+          forest_tbw[9:13, ] %>% 
+            mutate(Variable = gsub("Presence of furry pet", "    ", Variable)),
+           blank_tbw %>% mutate(Variable = "Vaccination"),
+           forest_tbw[14:16, ] %>%
+            mutate(Variable = gsub("Vaccination", "    ", Variable))) -> forest_tbw
+```
+
+```{R}
+list(Variable = c(list(expression(bold("Variable"))),
+                     forest_tbw$Variable),
+     
+     `Odds ratio (95% CI)` = c(list(expression(bold("Odds ratio (95% CI)"))),
+                               forest_tbw$`Odds ratio (95% CI)`),
+     `P value` = c(list(expression(bold("P value"))),
+                   forest_tbw$`P value`)) -> list
+```
+
+```{R}
+library(extrafont)
+library(forestplot)
+
+tiff("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure2.tiff",
+      height = 2800,
+      width = 3600,
+      res = 600)
+forestplot::forestplot(labeltext = list,
+           xticks =  c(log(0.02), log(0.1), 0, log(10), log(20)), # range of x axis
+           xticks.digits = 0,
+           
+           xlab = expression(bold("Odds ratio (95% CI)")),
+           
+           hrzl_lines = list("2" = gpar(lwd = 1, # line (band) width
+                        				    lineend = "butt", # shape of line end
+                        				    col = "black")#,
+                        #      "6" = gpar(lwd = 35, # line (band) width
+                        # 				    lineend = "butt", # shape of line end
+                        # 				    col = "#99999922"),
+                        #      "9" = gpar(lwd = 35, # line (band) width
+                        # 				    lineend = "butt", # shape of line e
+                        # 				    col = "#99999922"),
+                        #      "12" = gpar(lwd = 35, # line (band) width
+                        # 				    lineend = "butt", # shape of line end
+                        # 				    col = "#99999922")
+                             ), # color
+           
+           txt_gp = fpTxtGp(label = # text setting 
+                              list(gpar(cex = 0.8,
+                                        fontfamily = "sans")),
+                              ticks = gpar(cex = 0.8),
+                              xlab = gpar(cex = 0.8),
+                              title = gpar(cex = 1)),
+           
+           col = fpColors(lines = "black", # line of color 
+                          zero = "gray50"),
+           zero = 1,
+           cex = 1.3,
+           
+           lineheight = unit(6,"mm"), # line interval
+           graph.pos = 2, # col number of forest plot
+           xlog = TRUE,
+           boxsize = 0.30,
+           colgap = unit(2, "mm"),
+           lwd.zero = 1, # line strong
+           ci.vertices = TRUE,
+           ci.vertices.height = 0.2 ,
+           mean = c(NA,  forest_tbw$estimate),
+           lower = c(NA, forest_tbw$conf.low),
+           upper = c(NA, forest_tbw$conf.high))
+dev.off()
+```
+![](/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure2.tiff)
+
+
+# Aim3
+
+# Aim4
+```{R}
+# No Feces SA == 1 and skinNP SA == 0
+Hib_LR_SkinNP_tbw %>% 
+  select(SubjectID, matches("aureus@1M"), `7Y`) %>% 
+  inner_join(GutMb_Species_CR_tbw %>% 
+               select(SubjectID, matches("aureus@1M")) %>% 
+               mutate(`Feces: Staphylococcus aureus@1M` =
+                        if_else(`Feces: Staphylococcus aureus@1M`>0, "1", "0"))) %>% 
+  mutate(`Staphylococcus aureus@1M` = 
+           if_else(`Nasopharynx: Staphylococcus aureus@1M` == "1"|
+                     `Skin: Staphylococcus aureus@1M` == "1",
+                   "1", "0")) %>% 
+  inner_join(Metadata_tbw %>%
+               select(SubjectID, Sibling, Sex, `HBM@1M`)) -> Hib_LR_SA_tbw
+
+
+Hib_LR_SA_tbw %>% 
+  select(matches("@")) %>% 
+  names -> Variable_SA
+```
+
+```{R}
+map(Variable_SA, function(x){
+  as.formula(glue("`7Y` ~ `{x}`")) -> formula
+  
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_SA_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(grepl("Staphylococcus", term)) %>% 
+    mutate(Model = "Unadjusted") -> unadjusted_tbw
+  
+  as.formula(glue("`7Y` ~ `{x}` + Sibling + Sex")) -> formula
+  
+  glm(formula,
+      family = "binomial"(link = "logit"),
+      data = Hib_LR_SA_tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(grepl("Staphylococcus", term)) %>% 
+    mutate(Model = "Adjusted*") -> adjusted_tbw
+  
+  bind_rows(unadjusted_tbw,
+            adjusted_tbw)
+  }) %>% 
+  do.call(bind_rows, .) -> res_tbw
+
+res_tbw %>% 
+  tidy_table() %>% 
+  inner_join(res_tbw %>% 
+               rename(Variable = term) %>% 
+               select(Variable, estimate, conf.low, conf.high, Model)) %>% 
+  mutate(Variable = gsub("`Staphylococcus aureus@1M`1", "Any site", Variable)) %>% 
+  mutate(Variable = gsub("`|\\:\\ Staphylococcus aureus@1M`1", "", Variable)) %>% 
+  .[c(3,4,1,2,7,8,5,6), c(1,3,4,2, 5,6,7)] %>% 
+  mutate(Variable = if_else(Model == "Adjusted*", "", Variable)) -> forest_tbw
+```
+
+```{R}
+list(Variable = c(list(expression(bold("Variable"))),
+                     forest_tbw$Variable),
+     Model = c(list(expression(bold("Model"))),
+                     forest_tbw$Model),
+     `Odds ratio (95% CI)` = c(list(expression(bold("Odds ratio (95% CI)"))),
+                               forest_tbw$Estimate),
+     `P value` = c(list(expression(bold("P value"))),
+                   forest_tbw$`p-value`)) -> forest_list
+```
+
+## Figure4, forest plot
+```{R}
+library(extrafont)
+library(forestplot)
+
+tiff("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure4.tiff",
+      height = 1700,
+      width = 3200,
+      res = 600)
+forestplot::forestplot(labeltext = forest_list,
+           xticks =  c(log(0.5), 0, log(10), log(20)), # range of x axis
+           xticks.digits = 0,
+           
+           xlab = expression(bold("Odds ratio (95% CI)")),
+           
+           hrzl_lines = list("2" = gpar(lwd = 1, # line (band) width
+                        				    lineend = "butt", # shape of line end
+                        				    col = "black"),#,
+                             "5" = gpar(lwd = 35, # line (band) width
+                        				    lineend = "butt", # shape of line e
+                        				    col = "#99999922"),
+                             "9" = gpar(lwd = 35, # line (band) width
+                        				    lineend = "butt", # shape of line end
+                        				    col = "#99999922")
+                             ), # color
+           
+           txt_gp = fpTxtGp(label = # text setting 
+                              list(gpar(cex = 0.8,
+                                        fontfamily = "sans")),
+                              ticks = gpar(cex = 0.8),
+                              xlab = gpar(cex = 0.8),
+                              title = gpar(cex = 1)),
+           
+           col = fpColors(lines = "black", # line of color 
+                          zero = "gray50"),
+           zero = 1,
+           cex = 1.3,
+           
+           lineheight = unit(6,"mm"), # line interval
+           graph.pos = 3, # col number of forest plot
+           xlog = TRUE,
+           boxsize = 0.30,
+           colgap = unit(2, "mm"),
+           lwd.zero = 1, # line strong
+           ci.vertices = TRUE,
+           ci.vertices.height = 0.2 ,
+           mean = c(NA,  forest_tbw$estimate),
+           lower = c(NA, forest_tbw$conf.low),
+           upper = c(NA, forest_tbw$conf.high))
+dev.off()
+```
+![](/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure4.tiff)

@@ -1,0 +1,218 @@
+---
+title: "RIKEN-Vaccine: Aim2"
+subtitle: "September 5th, 2022"
+author: "Ryohei SHIBATA"
+output:
+ powerpoint_presentation:
+  slide_level: 2 # use this to override default
+  reference_doc: ~/Git/R/Template_ENW.pptx
+---
+
+
+```{r ChunkOption, include = FALSE, warning = FALSE}
+# chunk option
+knitr::opts_chunk$set(echo = FALSE, # chunkを出力として表示するか否か
+                      eval = FALSE, # chunkを実際にRのコードとして評価するか否か
+                      warning = FALSE, # chunkに対する警告を表示させるか否か
+                      message = FALSE, # chunkに対するエラーを表示させるか否か
+                      comment = "", # 計算結果の頭につく文字
+                      cache = FALSE ) 
+```
+
+```{R}
+source("RIKENcohort-Vaccine_Setup.R")
+```
+
+# Hib: low at 7Y
+## Clinical factors vs. Hib low at 7Y
+```{R}
+Vaccination_tbl %>% 
+  mutate(Value = case_when(Age == "6M"&Value < 3|Age == "6M"&is.na(Value) ~ "-",
+                           Age == "6M"&Value >= 3 ~ "+",
+                           Age == "1Y"&Value < 3 ~ "-",
+                           Age == "1Y"&Value >= 3 ~ "+",
+                           Age == "2Y"&Value < 4 ~ "-",
+                           Age == "2Y"&Value >= 3 ~ "+")) %>%
+  filter(Variable == "Hib") %>% 
+  mutate(Variable = case_when(Age == "6M" ~ "Vaccination 3 doses by 6M",
+                              Age == "1Y" ~ "Vaccination 4 doses by 1Y",
+                              Age == "2Y" ~ "Vaccination 4 doses by 2Y")) %>% 
+  select(-Age) %>% 
+               spread(Variable, Value) %>% 
+  c2f  -> Vaccination_Dichotomous_tbw
+```
+
+
+```{R}
+Metadata_tbw %>% 
+  select(SubjectID, Sibling,
+         matches("HBM|Pet|Daycare"), 
+         Sex, Delivery, Preterm, LBW) %>%
+  mutate_if(grepl("HBM", names(.)),
+            funs(if_else(. %in% c("Exclusive", "Almost"),
+                         "EBF",
+                    "Not EBF"))) %>% 
+  mutate_if(grepl("HBM", names(.)),
+            funs(fct_relevel(., "Not EBF"))) %>% 
+  c2f %>% 
+  inner_join(Hib_Dichotomous_tbw %>%
+               ungroup %>% 
+               select(SubjectID, `7Y`), .) %>% 
+  c2f %>% 
+  mutate_all(funs(fct_relevel(., "-"))) %>% 
+  ungroup %>% 
+  select(-`HBM@6M`,
+         -`Daycare_Ever@6M`, 
+         -`HBM@9M`) %>% 
+  mutate(`7Y` = if_else(`7Y` == "Low",
+                        1, 0)) %>% 
+  inner_join(Vaccination_Dichotomous_tbw %>% 
+               select(!matches("Sp"))) -> Metadata_Hib_tbw
+```
+
+```{R}
+Metadata_Hib_tbw %>% 
+  names %>% 
+  .[-1:-2] %>% 
+  .[!grepl("Siblings_Daycare|Preterm|LBW", .)]-> Exposures_Metadata
+
+Exposures_Metadata[1] -> x
+
+future_map(Exposures_Metadata, function(x){
+  
+  Metadata_Hib_tbw %>% 
+    .[, c("7Y", x)] -> tbw
+  
+  glue("`7Y` ~ `{x}`") %>% 
+    as.formula -> formula
+  
+  glm(formula,
+      family = binomial(link = "logit"),
+      data = tbw) %>% 
+    broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+    filter(term != "(Intercept)")
+}) %>% 
+  do.call(bind_rows, .) -> res_tbw
+```
+
+
+```{R}
+
+res_tbw %>% 
+  tidy_table() %>% 
+  inner_join(res_tbw %>% 
+               rename(Variable = term) %>% 
+               select(Variable, estimate, conf.low, conf.high)) %>% 
+  rename(`Odds ratio` = Estimate,
+         `P value` = `p-value`) %>% 
+  mutate(Variable = gsub("`|EBF|\\+|VD|Male", "", Variable)) %>% 
+  left_join(.,
+            Dictionary_tbw %>% 
+               rename(Variable = Variable_R)) %>% 
+  mutate(Variable = if_else(grepl("doses", Variable),
+                            Variable,
+                            Variable_Table)) %>% 
+  mutate(Number = case_when(Variable == "Vaccination 4 doses by 1Y" ~ 92,
+                            Variable == "Vaccination 4 doses by 2Y" ~ 93,
+                            Variable == "Vaccination 3 doses by 6M" ~ 91,
+                            !grepl("Number of", Variable) ~ Number)) %>% 
+  arrange(Number) %>% 
+  select(-Number, -Variable_Table) %>%
+  mutate(Variable = if_else(grepl("Breastfeeding", Variable),
+                            gsub("Breastfeeding", "(Almost) exclusive breastfeeding", Variable),
+                            paste(Variable))) %>% 
+  rename(`Odds ratio (95% CI)` = `Odds ratio`) -> forest_tbw
+
+forest_tbw %>% 
+  colnames %>% 
+  data.frame(Variable = .) %>% 
+  mutate(Value = NA) %>% 
+  spread(Variable, Value) %>% 
+  mutate_if(grepl("conf|estimate", names(.)), funs(as.numeric)) %>% 
+  mutate_if(!grepl("conf|estimate", names(.)), funs(as.character)) -> blank_tbw
+
+bind_rows(forest_tbw[1:3, ],
+          
+          blank_tbw %>% mutate(Variable = "(Almost) exclusive breastfeeding"),
+          forest_tbw[4:6, ] %>% 
+            mutate(Variable = gsub("\\(Almost\\) exclusive breastfeeding", "    ", Variable)),
+          
+          blank_tbw %>% mutate(Variable = "Ever attended daycare"),
+          forest_tbw[7:8, ] %>% 
+            mutate(Variable = gsub("Ever attended daycare", "    ", Variable)),
+          
+           blank_tbw %>% mutate(Variable = "Presence of furry pet"),
+          forest_tbw[9:13, ] %>% 
+            mutate(Variable = gsub("Presence of furry pet", "    ", Variable)),
+           blank_tbw %>% mutate(Variable = "Vaccination"),
+           forest_tbw[14:16, ] %>%
+            mutate(Variable = gsub("Vaccination", "    ", Variable))) -> forest_tbw
+```
+
+```{R}
+list(Variable = c(list(expression(bold("Variable"))),
+                     forest_tbw$Variable),
+     
+     `Odds ratio (95% CI)` = c(list(expression(bold("Odds ratio (95% CI)"))),
+                               forest_tbw$`Odds ratio (95% CI)`),
+     `P value` = c(list(expression(bold("P value"))),
+                   forest_tbw$`P value`)) -> list
+```
+
+```{R}
+library(extrafont)
+library(forestplot)
+
+tiff("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure2.tiff",
+      height = 2800,
+      width = 3600,
+      res = 600)
+forestplot::forestplot(labeltext = list,
+           xticks =  c(log(0.02), log(0.1), 0, log(10), log(20)), # range of x axis
+           xticks.digits = 0,
+           
+           xlab = expression(bold("Odds ratio (95% CI)")),
+           
+           hrzl_lines = list("2" = gpar(lwd = 1, # line (band) width
+                        				    lineend = "butt", # shape of line end
+                        				    col = "black")#,
+                        #      "6" = gpar(lwd = 35, # line (band) width
+                        # 				    lineend = "butt", # shape of line end
+                        # 				    col = "#99999922"),
+                        #      "9" = gpar(lwd = 35, # line (band) width
+                        # 				    lineend = "butt", # shape of line e
+                        # 				    col = "#99999922"),
+                        #      "12" = gpar(lwd = 35, # line (band) width
+                        # 				    lineend = "butt", # shape of line end
+                        # 				    col = "#99999922")
+                             ), # color
+           
+           txt_gp = fpTxtGp(label = # text setting 
+                              list(gpar(cex = 0.8,
+                                        fontfamily = "sans")),
+                              ticks = gpar(cex = 0.8),
+                              xlab = gpar(cex = 0.8),
+                              title = gpar(cex = 1)),
+           
+           col = fpColors(lines = "black", # line of color 
+                          zero = "gray50"),
+           zero = 1,
+           cex = 1.3,
+           
+           lineheight = unit(6,"mm"), # line interval
+           graph.pos = 2, # col number of forest plot
+           xlog = TRUE,
+           boxsize = 0.30,
+           colgap = unit(2, "mm"),
+           lwd.zero = 1, # line strong
+           ci.vertices = TRUE,
+           ci.vertices.height = 0.2 ,
+           mean = c(NA,  forest_tbw$estimate),
+           lower = c(NA, forest_tbw$conf.low),
+           upper = c(NA, forest_tbw$conf.high))
+dev.off()
+```
+![](Aim2/Table_Clinicaldata_Hib.png)

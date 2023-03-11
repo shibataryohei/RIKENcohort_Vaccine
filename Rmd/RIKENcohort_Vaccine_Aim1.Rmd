@@ -1,0 +1,151 @@
+---
+title: "RIKEN-Vaccine: Aim1"
+subtitle: "August 6th, 2022"
+author: "Ryohei SHIBATA"
+output:
+ powerpoint_presentation:
+  slide_level: 2 # use this to override default
+  reference_doc: ~/Git/R/Template_ENW.pptx
+---
+
+
+```{r ChunkOption, include = FALSE, warning = FALSE}
+# chunk option
+knitr::opts_chunk$set(echo = FALSE, # chunkを出力として表示するか否か
+                      eval = FALSE, # chunkを実際にRのコードとして評価するか否か
+                      warning = FALSE, # chunkに対する警告を表示させるか否か
+                      message = FALSE, # chunkに対するエラーを表示させるか否か
+                      comment = "", # 計算結果の頭につく文字
+                      cache = FALSE ) 
+
+Sys.setlocale("LC_ALL", 'UTF-8')
+options(scipen = 10)
+```
+
+
+```{R}
+source("RIKENcohort-Vaccine_Setup.R")
+```
+
+```{R}
+Titer_tbl %>% 
+   filter(Age != "UCB") %>% 
+  inner_join(Vaccination_tbl %>% 
+               spread(Age, Value) %>% 
+               mutate(`5Y` = `2Y`,
+                      `7Y` = `2Y`) %>% 
+               select(-`6M`) %>% 
+               gather(Age, Vaccination,
+                      -SubjectID, -Variable)) %>% 
+  mutate(Positive = if_else(Value >= 1, "1", "0")) %>% 
+  c2f -> TitVac_tbw
+```
+
+
+## Figure1A: pathplot
+```{R}
+Titer_tbl %>% 
+  mutate(Age = fct_relevel(Age, "UCB")) %>% 
+  
+  filter(Age != "UCB") %>% 
+  mutate(Variable = fct_recode(Variable,
+                               "S. pneumoniae (U/mL)" = "Sp",
+                               "H. influenzae type B (µg/mL)" = "Hib")) %>% 
+  ggplot(., aes(x = Age, y = Value, fill = Age))+
+  geom_line(color = "darkgray",
+            aes(group = SubjectID))+
+  geom_hline(yintercept = 1,
+             color = "firebrick3",
+             linetype = "dashed")+
+  facet_wrap(~ Variable, scale = "free_y")+
+  labs(y = "Titer")+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 10),
+        axis.text = element_text(size = 10),
+        strip.text = element_text(size = 10))+
+  scale_y_log10()+
+  theme(axis.title.x = element_blank())+
+  geom_hline(yintercept = 1,
+             linetype = "dashed",
+             color = "firebrick4") -> Fig1A_gg
+
+ggsave("Aim1/Figure1A.tiff",
+       plot = Fig1A_gg,
+       dpi = 300, h = 2.75 , w = 5.25)
+```
+![](Aim1/Figure1A.tiff)
+
+## Density plot (Sp)
+```{R}
+Titer_tbl %>% 
+  mutate(Age = fct_relevel(Age, "UCB")) %>% 
+  filter(Age != "UCB") %>% 
+  filter(Variable == "Sp") %>% 
+  ggplot(., aes(x = Value, fill = Age))+
+  geom_density(alpha = 0.3)+
+  labs(x = "Titer")+
+  scale_x_log10()
+ggsave("Aim1/Densityplot_Sp.png",
+       dpi = 300, h = 3, w = 4)
+```
+![](Aim1/Densityplot_Sp.png)
+
+## Figure1B: alluvium plot, Hib
+```{R}
+Titer_tbl %>% 
+  mutate(Value = log(Value, 2)) %>% 
+  filter(Variable == "Hib") %>% 
+  filter(Age != "UCB") %>% 
+  mutate(Cutoff = log(1, 2)) %>% 
+  mutate(Group = if_else(Value > Cutoff, "≥1.0", "<1.0")) %>%
+  select(SubjectID, Age, Group) %>% 
+  spread(Age, Group) %>% 
+  group_by(`1Y`, `2Y`, `5Y`, `7Y`) -> Hib_Dichotomous_tbw
+
+Hib_Dichotomous_tbw %>% 
+  summarise(Count = n()) %>% 
+  mutate_if(is.character, funs(fct_relevel(., "≥1.0"))) -> Hib_Alluvium_tbw
+  
+ggplot(Hib_Alluvium_tbw,
+       aes(y = Count,
+           axis1 = `1Y`,
+           axis2 = `2Y`,
+           axis3 = `5Y`,
+           axis4 = `7Y`)) +
+  geom_alluvium(aes(fill = `7Y`),
+                width = 1/12) +
+  geom_stratum(width = 2/12,
+               fill = "white",
+               color = "grey") +
+  geom_label(stat = "stratum",
+             size = 3.5,
+             aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("1Y", "2Y", "5Y", "7Y"),
+                   expand = c(0.1, .05)) +
+  #scale_fill_manual(values = Colors_Endotype[1:5])+
+  theme(axis.text = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10))+
+  labs(fill = "Long-term protective titer") +
+  scale_fill_brewer(palette = "Set2",labels = c("+", "-")) -> Fig1B_gg
+ggsave("Aim1/Figure1B.tiff",
+       plot = Fig1B_gg,
+       dpi = 300, h = 4, w = 5)
+```
+![](Aim1/Alluvium_Cluster.png)
+
+## Figure1
+```{R}
+ggpubr::ggarrange(plotlist = list(Fig1A_gg,
+                                  Fig1B_gg),
+                          labels = c("A.", "B."),
+                  nrow = 2,
+                  heights = c(0.85, 1),
+                  widths = c(0.85, 1)) %>% 
+ggsave("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure1.tiff",
+       plot = .,
+       dpi = 600, 
+       h = 5.5, w = 5)
+```
+
