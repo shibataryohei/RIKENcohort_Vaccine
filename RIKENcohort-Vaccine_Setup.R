@@ -33,8 +33,21 @@ Cohort_tbw %>%
 #   write_csv(.,
 #             "/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Dictionary.csv")
 
+Clinicaldata_tbw %>% 
+  mutate(Sibling = if_else(Sibling > 1, "+", "-")) %>% 
+  mutate_if(grepl("HBM@1M|HBM@4M", names(.)), funs(case_when(. == "Exclusive" ~ "Exclusive or almost exclusive",
+                                                            . == "Almost" ~ "Exclusive or almost exclusive",
+                                                            . == "Some" ~ "Some",
+                                                            . == "Little" ~ "Little or no",
+                                                            . == "No" ~ "Little or no"))) %>% 
+  mutate(Gestation_Week = if_else(Gestation_Week < 37, "+", "-")) %>% 
+  mutate(BirthBW = if_else(BirthBW < 2500, "+", "-")) %>% 
+  mutate(Hospital = fct_relevel(Hospital, "CUH")) %>% 
+  c2f %>% 
+  mutate_if(is.factor, fct_relevel_plus) %>% 
+  mutate_if(is.factor, fct_relevel_hbm) %>% 
+  c2f -> Clinicaldata_Analysis_tbw 
+
 read_excel("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Dictionary_RIKENcohort-Vaccine.xlsx") %>% 
   filter(!is.na(Number)) %>% 
   select(Number, Variable_R, Variable_Table) -> Dictionary_tbw
-  
-  

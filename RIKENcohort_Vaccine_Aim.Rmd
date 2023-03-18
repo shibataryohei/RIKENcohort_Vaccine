@@ -38,16 +38,8 @@ Titer_tbl %>%
 Dictionary_tbw %>% 
   .$Variable_R -> Clinicaldata_Dictionary
 
-Clinicaldata_tbw %>% 
-  
-  select(SubjectID, Clinicaldata_Dictionary) %>% 
-  mutate(Gestation_Week = if_else(Gestation_Week < 37, "+", "-")) %>% 
-  mutate(BirthBW = if_else(BirthBW < 2500, "+", "-")) %>% 
-  mutate(Hospital = fct_relevel(Hospital, "CUH")) %>% 
-  c2f %>% 
-  mutate_if(is.factor, fct_relevel_plus) %>% 
-  mutate_if(is.factor, fct_relevel_hbm) %>% 
-    mutate(Sibling = as.factor(Sibling)) -> tbw
+Clinicaldata_Analysis_tbw %>% 
+  select(SubjectID, Clinicaldata_Dictionary)  -> tbw
 
 Dictionary_tbw %>% 
   .$Variable_Table -> names(tbw)[-1] 
@@ -73,8 +65,7 @@ tbw %>%
                      digits_con = 1,
                      digits_cat = 0,
                      show_all = FALSE,
-                     multi_level = c("The number of older siblings",
-                                     "Breastfeeding at 1W",
+                     multi_level = c("Breastfeeding at 1W",
                                      "Breastfeeding at 1M",
                                      "Breastfeeding at 4M")) %>% 
   inner_join(Cohort_Overall_tbw, .) %>% 
@@ -226,12 +217,12 @@ Vaccination_tbl %>%
 
 
 ```{R}
-Metadata_tbw %>% 
+Clinicaldata_Analysis_tbw %>% 
   select(SubjectID, Sibling,
          matches("HBM|Pet|Daycare"), 
-         Sex, Delivery, Preterm, LBW) %>%
+         Sex, Delivery, Gestation_Week, BirthBW, Mother_ABx, `ABx@1W`) %>%
   mutate_if(grepl("HBM", names(.)),
-            funs(if_else(. %in% c("Exclusive", "Almost"),
+            funs(if_else(. %in% c("Exclusive or almost exclusive", "Exclusive"),
                          "EBF",
                     "Not EBF"))) %>% 
   mutate_if(grepl("HBM", names(.)),
@@ -241,28 +232,32 @@ Metadata_tbw %>%
                ungroup %>% 
                select(SubjectID, `7Y`), .) %>% 
   c2f %>% 
-  mutate_all(funs(fct_relevel(., "-"))) %>% 
   ungroup %>% 
-  select(-`HBM@6M`,
-         -`Daycare_Ever@6M`, 
-         -`HBM@9M`) %>% 
-  mutate(`7Y` = if_else(`7Y` == "Low",
-                        1, 0)) %>% 
+  select(-`Daycare_Ever@6M`) %>% 
+  mutate(`7Y` = if_else(`7Y` == "<1.0",
+                        "1", "0")) %>% 
   inner_join(Vaccination_Dichotomous_tbw %>% 
-               select(!matches("Sp"))) -> Metadata_Hib_tbw
+               select(!matches("Sp|6M"))) %>% 
+  mutate_all(funs(fct_relevel(., "-"))) %>% 
+  mutate_all(funs(fct_relevel(., "Not EBF"))) %>% 
+  mutate(Delivery = fct_relevel(Delivery, "VD")) %>% 
+  mutate(Sex = fct_relevel(Sex, "Male")) %>% 
+  c2f -> Clinicaldata_Hib_tbw 
+
+Clinicaldata_Hib_tbw %>% summary
 ```
 
 ```{R}
-Metadata_Hib_tbw %>% 
+Clinicaldata_Hib_tbw %>% 
   names %>% 
   .[-1:-2] %>% 
-  .[!grepl("Siblings_Daycare|Preterm|LBW", .)]-> Exposures_Metadata
+  .[!grepl("Siblings_Daycare|BirthBW|Gestational", .)]-> Exposures_Metadata
 
 Exposures_Metadata[1] -> x
 
 future_map(Exposures_Metadata, function(x){
   
-  Metadata_Hib_tbw %>% 
+  Clinicaldata_Hib_tbw %>% 
     .[, c("7Y", x)] -> tbw
   
   glue("`7Y` ~ `{x}`") %>% 
@@ -282,7 +277,6 @@ future_map(Exposures_Metadata, function(x){
 
 
 ```{R}
-
 res_tbw %>% 
   tidy_table() %>% 
   inner_join(res_tbw %>% 
@@ -290,7 +284,7 @@ res_tbw %>%
                select(Variable, estimate, conf.low, conf.high)) %>% 
   rename(`Odds ratio` = Estimate,
          `P value` = `p-value`) %>% 
-  mutate(Variable = gsub("`|EBF|\\+|VD|Male", "", Variable)) %>% 
+  mutate(Variable = gsub("`|EBF|\\+|CS|Female", "", Variable)) %>% 
   left_join(.,
             Dictionary_tbw %>% 
                rename(Variable = Variable_R)) %>% 
@@ -306,7 +300,12 @@ res_tbw %>%
   mutate(Variable = if_else(grepl("Breastfeeding", Variable),
                             gsub("Breastfeeding", "(Almost) exclusive breastfeeding", Variable),
                             paste(Variable))) %>% 
+  filter(!grepl("Prematurity|Low|pregnancy", Variable)) %>% 
   rename(`Odds ratio (95% CI)` = `Odds ratio`) -> forest_tbw
+```
+
+
+```{R}
 
 forest_tbw %>% 
   colnames %>% 
@@ -316,21 +315,21 @@ forest_tbw %>%
   mutate_if(grepl("conf|estimate", names(.)), funs(as.numeric)) %>% 
   mutate_if(!grepl("conf|estimate", names(.)), funs(as.character)) -> blank_tbw
 
-bind_rows(forest_tbw[1:3, ],
+bind_rows(forest_tbw[1:4, ],
           
-          blank_tbw %>% mutate(Variable = "(Almost) exclusive breastfeeding"),
-          forest_tbw[4:6, ] %>% 
+          blank_tbw %>% mutate(Variable = "(Almost) exclusive breastfeeding*"),
+          forest_tbw[5:7, ] %>% 
             mutate(Variable = gsub("\\(Almost\\) exclusive breastfeeding", "    ", Variable)),
           
           blank_tbw %>% mutate(Variable = "Ever attended daycare"),
-          forest_tbw[7:8, ] %>% 
+          forest_tbw[8:9, ] %>% 
             mutate(Variable = gsub("Ever attended daycare", "    ", Variable)),
           
            blank_tbw %>% mutate(Variable = "Presence of furry pet"),
-          forest_tbw[9:13, ] %>% 
+          forest_tbw[10:14, ] %>% 
             mutate(Variable = gsub("Presence of furry pet", "    ", Variable)),
-           blank_tbw %>% mutate(Variable = "Vaccination"),
-           forest_tbw[14:16, ] %>%
+           blank_tbw %>% mutate(Variable = "Hib vaccination"),
+           forest_tbw[15:16, ] %>%
             mutate(Variable = gsub("Vaccination", "    ", Variable))) -> forest_tbw
 ```
 
@@ -349,7 +348,7 @@ library(extrafont)
 library(forestplot)
 
 tiff("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure2.tiff",
-      height = 2800,
+      height = 2600,
       width = 3600,
       res = 600)
 forestplot::forestplot(labeltext = list,
@@ -467,7 +466,7 @@ res_tbw %>%
 ```
 
 ```{R}
-list(Variable = c(list(expression(bold("Variable"))),
+list(Variable = c(list(expression(bold("Site"))),
                      forest_tbw$Variable),
      Model = c(list(expression(bold("Model"))),
                      forest_tbw$Model),

@@ -271,55 +271,101 @@ NPMb_tbw %>%
 ![](Aim3/Table_SA_NpMb.png)
 
 
-## LOCOM
+# Lasso
 ```{R}
-install.packages(c("Rcpp", "RcppArmadillo", "metap", "utils", "psych", "permute", "parallel", "devtools", "BiocManager"))
-BiocManager::install("BiocParallel")
-devtools::install_github("yijuanhu/LOCOM")
-library(LOCOM)
+Hib_Dichotomous_tbw %>% 
+               ungroup %>% 
+               select(SubjectID, `7Y`) %>%
+  mutate(`7Y` = if_else(`7Y` == "≥1.0", , 0)) %>% 
+  rename(LTPT = `7Y`) -> LTPT_tbl
+
+#Lipid_Species_Norm_df %>% 
+Genus_tbl %>% 
+  filter(Age == "1W") %>% 
+  filter_mb(., 0.1) %>% 
+  spread(Variable, Value) %>% 
+  select(-Age) %>% 
+  inner_join(LTPT_tbl, .) %>%
+  c2r("SubjectID") %>% 
+  mutate_all(as.numeric) %>% 
+  as.matrix -> Genus_Lasso_mx
+
+set.seed(1202)
+
+glmnet::cv.glmnet(x = Genus_Lasso_mx[, -1],
+          y = as.factor(Genus_Lasso_mx[, 1]),
+       alpha = 1, # α = 0, Ridge; 0 < α < 1, Elastic Net
+       family = "binomial") -> Lasso_cv
+
+png("Aim3/Point_Lambda_Error.png",
+    res = 300, h = 1200, w = 1000)
+plot(Lasso_cv)
+dev.off()
 ```
+![](Lipid/Point_Lambda_Error.png)
 
 ```{R}
-# loading data
-data("throat.otu.table")
-data("throat.meta")
-data("throat.otu.taxonomy")
-otu.table <- data.matrix(throat.otu.table)
-Y <- ifelse(throat.meta$SmokingStatus == "NonSmoker", 0, 1)
-C <- data.matrix(model.matrix(Y ~ throat.meta$Sex + throat.meta$AntibioticUsePast3Months_TimeFromAntibioticUsage - 1))[, -1]
+# Fit the final model on the training data
+glmnet::cv.glmnet(x = Genus_Lasso_mx[, -1],
+          y = as.factor(Genus_Lasso_mx[, 1]),
+       alpha = 1, # α = 0, Ridge; 0 < α < 1, Elastic Net
+       family = "binomial") -> Lasso_All_cv
 
-# filtering out three samples with antibiotic use
-filter.out.sam <- which(C[, 3] == 0)
-otu.table.filter <- otu.table[-filter.out.sam,]
-Y <- Y[-filter.out.sam]
-C <- C[-filter.out.sam,]
+glmnet::glmnet(Genus_Lasso_mx[, -1],
+        as.factor(Genus_Lasso_mx[, 1]),
+        #Asthma,
+        alpha = 1, # 1, lasso; 0, ridge
+        family = "binomial",
+        lambda = Lasso_All_cv$lambda.min # lambda.min or  lambda.1se
+        ) -> Lasso_All_lasso # Lasso_2vsOthers_cv$lambda.1se
 
-# filtering out rare OTUs
-prop.presence.thresh <- 0.2
-prop.presence <- colMeans(otu.table.filter > 0)
-filter.out.otu <- which(prop.presence < prop.presence.thresh)
-if (length(filter.out.otu) > 0) {
-    otu.table.filter <- otu.table.filter[, -filter.out.otu]
-    prop.presence <- prop.presence[-filter.out.otu]
-}
 
-# running locom
-res <- locom(otu.table = otu.table.filter, Y = Y, C = C[, 1], fdr.nominal = 0.1, seed = 1, adjustment = "Sandev", n.cores = 4)
+coef(Lasso_All_lasso) %>%
+  as.matrix %>% 
+  as.data.frame %>% 
+  filter(s0 != 0) %>% 
+  r2c("Genus") %>% 
+  arrange(desc(abs(s0))) -> Lasso_Result_tbw
 
-# summarizing results
-# ordering the detected OTUs by their p-values. If no OTU is detected, we can still provide a summary table for
-# the top (e.g., 10) OTUs by re-defining o = order(res$p.otu)[1:10]
-w <- match(res$detected.otu, colnames(res$p.otu))
-o <- w[order(res$p.otu[w])]
+Lasso_Result_tbw %>% 
+  filter(!grepl("Intercept", Genus)) %>% 
+  .$Genus -> Genus_Hib
 
-summary.table <- data.frame(otu.name = colnames(res$p.otu)[o],
-                            mean.freq = colMeans(otu.table.filter/rowSums(otu.table.filter))[o],
-                            prop.presence = prop.presence[o],
-                            p.value = signif(res$p.otu[o], 3),
-                            q.value = signif(res$q.otu[o], 3),
-                            effect.size = signif(res$effect.size[o], 3),
-                            otu.tax = throat.otu.taxonomy[as.numeric(colnames(res$p.otu)[o]) + 1],
-                            row.names = NULL)
-summary.table
+Lasso_Result_tbw %>% 
+  table2png("Aim3/Table_Predictor.png")
+```
+![](Lipid/Table_Predictor.png)
 
+
+```{R}
+Genus_tbl %>% 
+  filter(Variable %in% Genus_Hib) %>% 
+  inner_join(LTPT_tbl) %>% 
+  group_by(Variable) %>% 
+  rstatix::wilcox_test(Value ~ LTPT) %>% 
+  arrange(p) %>% 
+  filter(p < 0.05) %>% 
+  .$Variable -> sd1
+
+Genus_tbl %>% 
+  filter(Variable %in% sd1) %>% 
+  inner_join(LTPT_tbl) %>% 
+  #mutate(Fungitype = if_else(Fungitype == "2", 
+  #                           "2", "0+1")) %>% 
+  ggplot(., aes(x = as.factor(LTPT), y = Value, color = LTPT))+
+  ggbeeswarm::geom_quasirandom(size = 0.5)+
+  geom_boxplot(alpha = 0, color = "darkgray", size = 0.25)+
+  facet_wrap(~ Variable, scale = "free", nrow = 1) +
+  labs(y = "Concentration") +
+  guides(color = FALSE)
+ggsave("Aim3/Beeswarm_LTPT_Genus.png",
+       dpi = 300, h = 4.5, w = 7.5)
+```
+![](Lipid/Beeswarm_Fungitype_Species.png)
+
+```{R}
+Lipid_Species_tbl %>% 
+  filter(Variable %in% Lipid_Species_CPAPintubate) %>% 
+  spread(Variable, Value) %>% 
+  c2r("study_id") -> Lipid_Species_Lasso_df
 ```
