@@ -1,5 +1,8 @@
-# Ridge regression
+# lasso regression
+
+## Preparation
 library(caret)
+library(tidyverse)
 
 Hib_Dichotomous_tbw %>% 
   ungroup %>% 
@@ -8,7 +11,6 @@ Hib_Dichotomous_tbw %>%
   mutate_all(as.factor) %>% 
   rename(LTPT = `7Y`) -> LTPT_tbl
 
-#Lipid_Species_Norm_df %>% 
 Genus_tbl %>% 
   filter(Age == "1W") %>% 
   check_levels("SubjectID") %>% 
@@ -24,49 +26,34 @@ Genus_tbl %>%
   c2r("SubjectID") %>% 
   as.data.frame -> genus_lasso_df
 
-LTPT_tbl %>% 
-  filter(SubjectID %in% subjectID_analysis_feces) %>% 
-  .$LTPT -> ltpt
-
-levels(ltpt)
-
 myTrainingControl <- trainControl(method = "LOOCV", 
-                                  returnResamp="all",
+                                  returnResamp = "all",
                                   savePredictions = TRUE, 
                                   classProbs = TRUE,
                                   summaryFunction = twoClassSummary,
                                   preProcOptions = NULL)
 # Grid
-train_grid.ridge <- expand.grid(alpha  = 0,
+train_grid.lasso <- expand.grid(alpha  = 1, # 1, lasso; 0, lasso
                                 lambda = seq(0, 1, by = 0.01)) # 0.001
 
-
-fit_ridge <- caret::train(LTPT ~ .,  
+fit_lasso <- caret::train(LTPT ~ .,  
                           data   = genus_lasso_df, 
                           method = "glmnet", 
                           metric = "ROC",  
-                          tuneGrid  = train_grid.ridge,
+                          tuneGrid  = train_grid.lasso,
                           trControl = myTrainingControl)
 
 # Decide model to evaluate
-model_ridge_final <- fit_ridge 
+model_lasso_final <- fit_lasso 
 
 # Check the fitted model
-plot(model_ridge_final)
+plot(model_lasso_final)
 # Function get best result 
 
-get_best_result = function(caret_fit){
-  best = which(rownames(caret_fit$results) == rownames(caret_fit$bestTune))
-  best_result = caret_fit$results[best, ]
-  rownames(best_result) = NULL
-  best_result
-}
-
-# Best parameters
-model_ridge_final$bestTune %>% 
+model_lasso_final$bestTune %>% 
   rownames -> best_n
 
-model_ridge_final$results %>% 
+model_lasso_final$results %>% 
   .[best_n, ] %>% 
   as.data.frame -> best_result
 
@@ -74,56 +61,56 @@ best_result$lambda -> best_lambda
 
 
 # Result of best parameter1
-model_ridge_final$finalModel %>% 
+model_lasso_final$finalModel %>% 
   coef(., s = best_lambda) %>% 
-  exp -> ridge_full.or
+  exp -> lasso_full.or
 
 # Result of best parameter
-coef(model_ridge_final$finalModel,
-       model_ridge_final$bestTune$lambda) %>% 
+coef(model_lasso_final$finalModel,
+     model_lasso_final$bestTune$lambda) %>% 
+  as.matrix %>% 
   as.data.frame %>% 
-  c2r("variable") -> df_coeff_ridge
+  r2c("Variable") %>% 
+  filter(!grepl("ntercept", variable)) %>% 
+  rename(Coef = s1) %>% 
+  filter(Coef != 0) %>% 
+  filter(!grepl("Intercept", Variable)) %>% 
+  .$Variable -> variable_lasso
 
-df_coeff_ridge.pre <- mat_coeff_ridge %>% as.data.frame()
+genus_lasso_df %>% 
+  .[, c(variable_lasso, "LTPT")] -> genus_lasso2_df
 
-df_coeff_ridge <- rownames_to_column(df_coeff_ridge.pre, var = "variable")
-names(df_coeff_ridge)[ which( names(df_coeff_ridge)=="V1") ] <- "coef"
-df_coeff_ridge$OR <- exp(df_coeff_ridge$coef)
-df_coeff_ridge
+# Bootstrap
+set.seed(1202)
+furrr::future_map(1:2000, function(i){
+  
+  sample(x = 1:nrow(genus_lasso2_df), 
+          size = nrow(genus_lasso2_df), # 21
+          replace = T) -> boot_rows
+  
+  genus_lasso2_df %>% 
+    .[boot_rows, ] -> genus_lasso_bootstrap_df
+  
+  boot.lasso_full <- caret::train(LTPT ~ .,  
+                            data   = genus_lasso_bootstrap_df, 
+                            method = "glmnet", 
+                            metric = "ROC",  
+                            tuneGrid  = expand.grid(lambda = best_lambda,
+                                                    alpha = 0),
+                            trControl = myTrainingControl)
+  
+  coef(boot.lasso_full$finalModel,
+       s = best_lambda) %>% 
+    as.matrix %>% 
+    as.data.frame %>% 
+    r2c("Variable") %>% 
+    filter(!grepl("Intercept", Variable)) %>% 
+    mutate(Simulation = i) %>% 
+    rename(coef = s1)}) -> list
 
-####################################
-modulename <- df_coeff_ridge[,1]
-nsim <- 2000
-nofv <- length(modulename)
-# Create Data holder
-data_boot_holder <- createdf(nsim,nofv, colnames = c( modulename))
-result_or <- createdf(nofv,7, colnames = c( "Module","OR","lowCI","upCI", "Coef", "absCoef"))
-######################################
-# Loop
-set.seed(1)
-data_boot <- df_models
-for (i in 1:nsim)
-{
-  boot_rows <-sample(x=c(1:nrow(data_boot)), size=nrow(data_boot), replace=T)
-  data_boot2 <-data_boot[boot_rows,]
-  boot.ridge_full  <-   caret::train(PPVuse ~ .,  
-                                     data   = df_integrated, 
-                                     method = "glmnet", 
-                                     metric = "ROC", 
-                                     tuneGrid = expand.grid(lambda = best_lambda , alpha = 0),
-                                     trControl = myTrainingControl
-  )
-  coef <- coef(boot.ridge_full$finalModel, s = best_lambda)
-  for (ii in 1:nofv) {
-    data_boot_holder[i,ii] <- coef[ii+1,1]
-  }}
-# Extract Coef(Odds Ratio) -Confidence Interval
-for (i in 1:nofv) {
-  result_or[i,1] <-  df_coeff_ridge$variable[i] 
-  d = quantile(data_boot_holder[,i], c(0.025,0.5, 0.975),na.rm=T)
-  result_or[i,2] <- exp(d[2]) #0.5CI
-  result_or[i,3] <- exp(d[1]) #0.025CI
-  result_or[i,4] <- exp(d[3]) #0.975CI
-  result_or[i,5] <- (d[2]) #0.5CI
-  result_or[i,6] <- abs(d[2]) #0.5CI
-}
+list %>% 
+  do.call(bind_rows, .) %>% 
+  group_by(Variable) %>% 
+  summarise(OR = exp(quantile(coef, 0.5, na.rm=T)),
+            lowCI = exp(quantile(coef, 0.025, na.rm=T)),
+            upCI = exp(quantile(coef, 0.975, na.rm=T))) -> res_tbw
