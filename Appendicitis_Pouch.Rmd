@@ -1,0 +1,131 @@
+---
+title: "RIKEN: Vaccine"
+subtitle: "June 6th, 2022"
+author: "Ryohei SHIBATA"
+output:
+ powerpoint_presentation:
+  slide_level: 2 # use this to override default
+  reference_doc: ~/Git/R/Template_ENW.pptx
+---
+
+
+```{r ChunkOption, include = FALSE, warning = FALSE}
+# chunk option
+knitr::opts_chunk$set(echo = FALSE, # chunkを出力として表示するか否か
+                      eval = FALSE, # chunkを実際にRのコードとして評価するか否か
+                      warning = FALSE, # chunkに対する警告を表示させるか否か
+                      message = FALSE, # chunkに対するエラーを表示させるか否か
+                      comment = "", # 計算結果の頭につく文字
+                      cache = FALSE ) 
+
+Sys.setlocale("LC_ALL", 'UTF-8')
+options(scipen = 10)
+source("../Database/Library/Library_Basic.R")
+source("../Database/Function/Function.R")
+xl.read.file("TestWorkbook.xlsx", password = "pass", write.res.password="pass")
+```
+
+```{R}
+read_excel("/Users/shibataryohei/Dropbox/Database/Appendiciits/★appe_解析用data★非穿孔論文用0322.xlsx",
+           sheet = "全対象") %>%  #c2f %>% names
+  rename(ShortABx = SP,
+         Age = 年齢,
+         Sex = 性別,
+         Gangrenous = 病理組織,
+         SSI = 創感染,
+         ABxMT0 = totalABx0日,
+         Pouch = 回収バッグ) %>% 
+  select(ID, Age, Sex, ShortABx, Gangrenous, SSI, Pouch, ABxMT0) %>% 
+  mutate(Pouch = as.factor(Pouch)) %>% 
+  mutate(ABxMT0 = as.factor(ABxMT0)) %>% 
+  mutate(ABxMT0 = fct_recode(ABxMT0,
+                             "1" = "0",
+                             "0" = "1")) %>% 
+  mutate(ABxMT0 = fct_relevel(ABxMT0, "0")) %>% 
+  mutate(ShortABx = as.factor(ShortABx)) %>% # c2f %>% summary
+  mutate(Gangrenous = if_else(grepl("G", Gangrenous), "1", "0")) %>% 
+  c2f -> tbw
+
+tbw %>% summary
+
+```
+
+```{R}
+glm(SSI ~ ShortABx + Pouch + Gangrenous + Age + Sex,
+      family = "binomial"(link = "logit"),
+      data = tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term)) %>% 
+  tidy_table()
+```
+
+```{R}
+glm(ABxMT0 ~ ShortABx + Pouch + Gangrenous + Age + Sex,
+      family = "binomial"(link = "logit"),
+      data = tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term)) %>% 
+  tidy_table()
+
+logistf::logistf(ABxMT0 ~ ShortABx,
+      data = tbw) -> fit
+
+data.frame(estimate = exp(fit$coefficients),
+             conf.low = exp(fit$ci.lower),
+             conf.high = exp(fit$ci.upper),
+             p.value = fit$prob) 
+
+logistf::logistf(ABxMT0 ~ ShortABx + Pouch + Gangrenous,
+      data = tbw) -> fit
+
+data.frame(estimate = exp(fit$coefficients),
+             conf.low = exp(fit$ci.lower),
+             conf.high = exp(fit$ci.upper),
+             p.value = fit$prob) 
+```
+
+```{R}
+glm(SSI ~ ShortABx,
+      family = "binomial"(link = "logit"),
+      data = tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term)) %>% 
+  tidy_table() %>% 
+  rename(`Odds ratio (95% CI)` = Estimate) %>% 
+  table2png("Table_ShortABx_SSI_Unadjusted.png")
+
+glm(SSI ~ ShortABx + Pouch + Gangrenous,
+      family = "binomial"(link = "logit"),
+      data = tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term)) %>% 
+  tidy_table() %>% 
+  rename(`Odds ratio (95% CI)` = Estimate) %>% 
+  table2png("Table_ShortABx_SSI_Adjusted.png")
+```
+
+```{R}
+glm(SSI ~ ShortABx*Gangrenous,
+      family = "binomial"(link = "logit"),
+      data = tbw) %>% 
+   broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+      filter(!grepl("Intercept", term)) %>% 
+  tidy_table() %>% 
+  rename(`Odds ratio (95% CI)` = Estimate) %>% 
+  table2png("Table_ShortABx_SSIandGangrenous.png")
+```

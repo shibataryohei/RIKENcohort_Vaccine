@@ -19,7 +19,8 @@ Genus_tbl %>%
 Genus_tbl %>% 
   filter(Age == "1W") %>% 
   filter(SubjectID %in% subjectID_analysis_feces) %>% 
-  filter_mb(., 0.1) %>% 
+  filter_mb(., 0.2) %>% 
+  mutate(Value = Value/30) %>% 
   spread(Variable, Value) %>% 
   select(-Age) %>% 
   inner_join(LTPT_tbl) %>% 
@@ -33,7 +34,7 @@ myTrainingControl <- trainControl(method = "LOOCV",
                                   summaryFunction = twoClassSummary,
                                   preProcOptions = NULL)
 # Grid
-train_grid.lasso <- expand.grid(alpha  = 1, # 1, lasso; 0, lasso
+train_grid.lasso <- expand.grid(alpha  = 1, # 1, lasso; 0, ridge
                                 lambda = seq(0, 1, by = 0.01)) # 0.001
 
 fit_lasso <- caret::train(LTPT ~ .,  
@@ -71,7 +72,7 @@ coef(model_lasso_final$finalModel,
   as.matrix %>% 
   as.data.frame %>% 
   r2c("Variable") %>% 
-  filter(!grepl("ntercept", variable)) %>% 
+  filter(!grepl("ntercept", Variable)) %>% 
   rename(Coef = s1) %>% 
   filter(Coef != 0) %>% 
   filter(!grepl("Intercept", Variable)) %>% 
@@ -111,6 +112,13 @@ furrr::future_map(1:2000, function(i){
 list %>% 
   do.call(bind_rows, .) %>% 
   group_by(Variable) %>% 
-  summarise(OR = exp(quantile(coef, 0.5, na.rm=T)),
-            lowCI = exp(quantile(coef, 0.025, na.rm=T)),
-            upCI = exp(quantile(coef, 0.975, na.rm=T))) -> res_tbw
+  summarise(OR = exp(quantile(coef, 0.5, na.rm = T)),
+            lowCI = exp(quantile(coef, 0.025, na.rm = T)),
+            upCI = exp(quantile(coef, 0.975, na.rm = T))) -> res_tbw
+
+res_tbw -> Lasso_1W_tbw
+
+Lasso_1W_tbw %>% 
+  filter(OR > 1&lowCI>1|OR <= 1&upCI<=1)
+
+write_csv(Lasso_1W_tbw, "CSV/Lasso_1W.csv")

@@ -1,5 +1,5 @@
 Sys.setlocale("LC_ALL", 'UTF-8')
-options(scipen = 10)
+options(scipen = 100)
 
 # Packages
 source("~/Git/Database/Library/Library_Basic.R" )
@@ -51,3 +51,5 @@ Clinicaldata_tbw %>%
 read_excel("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Dictionary_RIKENcohort-Vaccine.xlsx") %>% 
   filter(!is.na(Number)) %>% 
   select(Number, Variable_R, Variable_Table) -> Dictionary_tbw
+
+Age_Analysis <- c("1W", "1M", "1Y", "5Y", "7Y")

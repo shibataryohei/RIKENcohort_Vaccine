@@ -87,6 +87,43 @@ table2png(Cohort_table, "Aim0/Table_Cohort.png")
 ```
 ![](Aim0/Table_Cohort.png)
 
+## Cohort, bacteria
+```{R}
+
+SkinNPMb_df %>% 
+  r2c("SubjectID") %>%  
+  mutate_if(is.numeric, funs(if_else(. > 0, "1", "0"))) %>% 
+  filter(SubjectID %in% Clinicaldata_Analysis_tbw$SubjectID) %>% 
+  c2f %>% 
+  mutate(Dammy = 1) %>% 
+  summarise_background(data = .,
+                       omit = "SubjectID",
+                       digits_con = 1,
+                       digits_cat = 0,
+                       show_levels = TRUE) %>% 
+  filter(!grepl("-|0", Variables)) %>% 
+  filter(!grepl("Dammy|Number", Variables)) -> Cohort_Bacteria_Overall_tbw
+
+SkinNPMb_df %>% 
+  r2c("SubjectID") %>% 
+  mutate_if(is.numeric, funs(if_else(. > 0, "1", "0"))) %>% 
+  filter(SubjectID %in% Clinicaldata_Analysis_tbw$SubjectID) %>% 
+  mutate(Dammy = 1) %>% 
+  mutate(Cohort = if_else(SubjectID %in% SubjectID_Analysis,
+                          "Analytic cohort", "Non-analytic cohort")) %>% 
+  c2f -> tbw
+  compare_background(data = tbw,
+                     group = "Cohort",
+                     omit = "SubjectID",
+                     digits_con = 1,
+                     digits_cat = 0,
+                     show_all = FALSE,
+                     multi_level = c("Nasopharynx: Streptococcus pneumoniae@1M")) #%>% 
+  inner_join(Cohort_Overall_tbw, .) %>% 
+  mutate(P.value = format_pvalue(P.value)) -> Cohort_RAW_table
+
+```
+
 # Aim1
 ## Figure1A: pathplot
 ```{R}
@@ -400,6 +437,277 @@ dev.off()
 
 
 # Aim3
+## Lasso
+```{R}
+library(caret)
+library(tidyverse)
+
+Hib_Dichotomous_tbw %>% 
+  ungroup %>% 
+  select(SubjectID, `7Y`) %>%
+  mutate(`7Y` = if_else(`7Y` == "≥1.0", "Yes", "No")) %>% 
+  mutate_all(as.factor) %>% 
+  rename(LTPT = `7Y`) -> LTPT_tbl
+
+map(Age_Analysis, function(age){
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  check_levels("SubjectID") %>% 
+  intersect(., SubjectID_Analysis) -> subjectID_analysis_feces
+
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  filter(SubjectID %in% subjectID_analysis_feces) %>% 
+  filter_mb(., 0.2) %>% 
+  mutate(Value = Value/30) %>% 
+  spread(Variable, Value) %>% 
+  select(-Age) %>% 
+  inner_join(LTPT_tbl) %>% 
+  c2r("SubjectID") %>% 
+  as.data.frame -> genus_lasso_df
+
+myTrainingControl <- trainControl(method = "LOOCV", 
+                                  returnResamp = "all",
+                                  savePredictions = TRUE, 
+                                  classProbs = TRUE,
+                                  summaryFunction = twoClassSummary,
+                                  preProcOptions = NULL)
+# Grid
+train_grid.lasso <- expand.grid(alpha  = 1, # 1, lasso; 0, ridge
+                                lambda = seq(0, 1, by = 0.01)) # 0.001
+
+fit_lasso <- caret::train(LTPT ~ .,  
+                          data   = genus_lasso_df, 
+                          method = "glmnet", 
+                          metric = "ROC",  
+                          tuneGrid  = train_grid.lasso,
+                          trControl = myTrainingControl)
+
+# Decide model to evaluate
+model_lasso_final <- fit_lasso 
+
+# Function get best result 
+model_lasso_final$bestTune %>% 
+  rownames -> best_n
+
+model_lasso_final$results %>% 
+  .[best_n, ] %>% 
+  as.data.frame -> best_result
+
+best_result$lambda -> best_lambda
+
+# Result of best parameter1
+model_lasso_final$finalModel %>% 
+  coef(., s = best_lambda) %>% 
+  exp -> lasso_full.or
+
+# Result of best parameter
+coef(model_lasso_final$finalModel,
+     model_lasso_final$bestTune$lambda) %>% 
+  as.matrix %>% 
+  as.data.frame %>% 
+  r2c("Variable") %>% 
+  filter(!grepl("ntercept", Variable)) %>% 
+  rename(Coef = s1) %>% 
+  filter(Coef != 0) %>% 
+  filter(!grepl("Intercept", Variable)) %>% 
+  .$Variable -> variable_lasso
+
+genus_lasso_df %>% 
+  .[, c(variable_lasso, "LTPT")] -> genus_lasso2_df
+
+# Bootstrap
+set.seed(1202)
+furrr::future_map(1:20, function(i){
+  
+  sample(x = 1:nrow(genus_lasso2_df), 
+          size = nrow(genus_lasso2_df), # 21
+          replace = T) -> boot_rows
+  
+  genus_lasso2_df %>% 
+    .[boot_rows, ] -> genus_lasso_bootstrap_df
+  
+  boot.lasso_full <- caret::train(LTPT ~ .,  
+                            data   = genus_lasso_bootstrap_df, 
+                            method = "glmnet", 
+                            metric = "ROC",  
+                            tuneGrid  = expand.grid(lambda = best_lambda,
+                                                    alpha = 0),
+                            trControl = myTrainingControl)
+  
+  coef(boot.lasso_full$finalModel,
+       s = best_lambda) %>% 
+    as.matrix %>% 
+    as.data.frame %>% 
+    r2c("Variable") %>% 
+    filter(!grepl("Intercept", Variable)) %>% 
+    mutate(Simulation = i) %>% 
+    rename(coef = s1)}) -> list
+
+list %>% 
+  do.call(bind_rows, .) %>% 
+  group_by(Variable) %>% 
+  summarise(OR = exp(quantile(coef, 0.5, na.rm = T)),
+            lowCI = exp(quantile(coef, 0.025, na.rm = T)),
+            upCI = exp(quantile(coef, 0.975, na.rm = T)))}) -> res_tbw_list
+```
+
+```{R}
+res_tbw -> Lasso_1W_tbw
+
+map(res_tbw_list, function(tbw){
+  tbw %>% 
+  filter(OR > 1&lowCI>1|OR <= 1&upCI<=1)
+})
+
+
+write_csv(Lasso_1W_tbw, "CSV/Lasso_1W.csv")
+```
+
+
+
+
+
+## Figure 3: mb --> LTPT
+```{R}
+SkinNPMb_df %>% 
+  r2c("SubjectID") %>% 
+  select(-matches("Number")) %>% 
+  mutate_if(is.numeric, funs(if_else(. > 0, "1", "0"))) %>% 
+  c2f %>% 
+  inner_join(LTPT_tbl %>% 
+               mutate(LTPT = as.factor(LTPT)), .) -> Exposure_SkinNP_tbw
+
+Exposure_SkinNP_tbw %>% summary
+
+Exposure_SkinNP_tbw %>% 
+  select(-matches("pneumoniae|influenz")) %>% 
+  names %>% 
+  .[-1] -> Exposures_SkinNP
+
+future_map(Exposures_SkinNP, function(x){
+  
+  Exposure_SkinNP_tbw %>% 
+    .[, c("LTPT", x)] -> tbw
+  
+  glue("`LTPT` ~ `{x}`") %>% 
+    as.formula -> formula
+  
+  glm(formula,
+      family = binomial(link = "logit"),
+      data = tbw) %>% 
+    broom.mixed::tidy(.,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      exponentiate = TRUE) %>% 
+    filter(term != "(Intercept)")
+}) %>% 
+  do.call(bind_rows, .) -> res_tbw
+```
+
+
+```{R}
+res_tbw %>% 
+  tidy_table() %>% 
+  inner_join(res_tbw %>% 
+               rename(Variable = term) %>% 
+               select(Variable, estimate, conf.low, conf.high)) %>% 
+  rename(`Odds ratio` = Estimate,
+         `P value` = `p-value`) %>% 
+  mutate(Variable = gsub("`|`1", "", Variable)) %>% 
+  mutate(Variable = gsub("@", " at ", Variable)) %>% 
+  rename(`Odds ratio (95% CI)` = `Odds ratio`) %>% 
+  .[c(3:4, 1:2), ] -> forest_tbw
+```
+
+
+```{R}
+forest_tbw %>% 
+  colnames %>% 
+  data.frame(Variable = .) %>% 
+  mutate(Value = NA) %>% 
+  spread(Variable, Value) %>% 
+  mutate_if(grepl("conf|estimate", names(.)), funs(as.numeric)) %>% 
+  mutate_if(!grepl("conf|estimate", names(.)), funs(as.character)) -> blank_tbw
+
+LOCOM_Pglobal_tbl %>% 
+  rename(`P value` = P.global,
+         Variable = Age) %>% 
+  mutate(Variable = paste("    Global level at", Variable)) %>% 
+  mutate(`Odds ratio (95% CI)` = NA,
+         estimate = NA,
+         conf.low = NA,
+         conf.high = NA) %>% 
+  mutate(`P value` = format_pvalue(`P value`)) %>% 
+  mutate(`P value` = paste0(`P value`, "")) -> LOCOM_Pglobal_tbw
+
+bind_rows(blank_tbw %>% 
+            mutate(Variable = "Skin"),
+          forest_tbw[1:2, ] %>% 
+            mutate(Variable = gsub("Skin: ", "    ", Variable)),
+          blank_tbw %>% 
+            mutate(Variable = "Nasopharynx*"),
+          forest_tbw[3:4, ] %>% 
+            mutate(Variable = gsub("Nasopharynx: ", "    ", Variable)),
+          blank_tbw %>% 
+            mutate(Variable = "Feces"),
+          LOCOM_Pglobal_tbw) -> forest2_tbw
+```
+
+```{R}
+list(Variable = c(list(expression(bold("Variable"))),
+                     forest2_tbw$Variable),
+     `Odds ratio (95% CI)` = c(list(expression(bold("Odds ratio (95% CI)"))),
+                               forest2_tbw$`Odds ratio (95% CI)`),
+     `P value` = c(list(expression(bold("P value"))),
+                   forest2_tbw$`P value`)) -> list
+```
+
+```{R}
+library(extrafont)
+library(forestplot)
+
+tiff("/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure3.tiff",
+      height = 1800,
+      width = 3300,
+      res = 600)
+forestplot::forestplot(labeltext = list,
+           xticks =  c(log(0.1), 0, log(10), log(20)), # range of x axis
+           xticks.digits = 0,
+           
+           xlab = expression(bold("Odds ratio (95% CI)")),
+           
+           hrzl_lines = list("2" = gpar(lwd = 1, # line (band) width
+                        				    lineend = "butt", # shape of line end
+                        				    col = "black")), # color
+           
+           txt_gp = fpTxtGp(label = # text setting 
+                              list(gpar(cex = 0.8,
+                                        fontfamily = "sans")),
+                              ticks = gpar(cex = 0.8),
+                              xlab = gpar(cex = 0.8),
+                              title = gpar(cex = 1)),
+           
+           col = fpColors(lines = "black", # line of color 
+                          zero = "gray50"),
+           zero = 1,
+           cex = 1.3,
+           
+           lineheight = unit(6,"mm"), # line interval
+           graph.pos = 2, # col number of forest plot
+           xlog = TRUE,
+           boxsize = 0.30,
+           colgap = unit(2, "mm"),
+           lwd.zero = 1, # line strong
+           ci.vertices = TRUE,
+           ci.vertices.height = 0.2 ,
+           mean = c(NA,  forest2_tbw$estimate),
+           lower = c(NA, forest2_tbw$conf.low),
+           upper = c(NA, forest2_tbw$conf.high))
+dev.off()
+```
+![](/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure2.tiff)
+
 
 # Aim4
 ```{R}
