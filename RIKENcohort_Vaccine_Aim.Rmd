@@ -459,7 +459,7 @@ Genus_tbl %>%
   filter(Age == age) %>% 
   filter(SubjectID %in% subjectID_analysis_feces) %>% 
   filter_mb(., 0.2) %>% 
-  mutate(Value = Value/30) %>% 
+  mutate(Value = Value/3) %>% 
   spread(Variable, Value) %>% 
   select(-Age) %>% 
   inner_join(LTPT_tbl) %>% 
@@ -518,7 +518,7 @@ genus_lasso_df %>%
 
 # Bootstrap
 set.seed(1202)
-furrr::future_map(1:20, function(i){
+furrr::future_map(1:2000, function(i){
   
   sample(x = 1:nrow(genus_lasso2_df), 
           size = nrow(genus_lasso2_df), # 21
@@ -550,7 +550,30 @@ list %>%
   summarise(OR = exp(quantile(coef, 0.5, na.rm = T)),
             lowCI = exp(quantile(coef, 0.025, na.rm = T)),
             upCI = exp(quantile(coef, 0.975, na.rm = T)))}) -> res_tbw_list
+
+names(res_tbw_list) <- Age_Analysis
+
+imap(res_tbw_list, ~ write_csv(.x, glue("/Users/shibataryohei/Dropbox/Database/RIKENcohort/CSV/Lasso_{.y}.csv")))
+
+map(res_tbw_list, ~ .x %>% 
+      filter(OR < 1 & upCI < 1|OR > 1 & lowCI > 1))
 ```
+
+```{R}
+map(Age_Analysis, function(age){
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  check_levels("SubjectID") %>% 
+  intersect(., SubjectID_Analysis) -> subjectID_analysis_feces
+
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  filter(SubjectID %in% subjectID_analysis_feces) %>% 
+  filter_mb(., 0.2) %>% 
+  inner_join(LTPT_tbl) %>% 
+  group_bye
+```
+
 
 ```{R}
 res_tbw -> Lasso_1W_tbw
@@ -707,6 +730,56 @@ forestplot::forestplot(labeltext = list,
 dev.off()
 ```
 ![](/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure2.tiff)
+
+
+## coda4microbiome
+```{R}
+install.packages("coda4microbiome")
+
+library(coda4microbiome)
+data(Crohn,
+     package = "coda4microbiome")
+coda_glmnet(x_Crohn[,(1:10)],y_Crohn,showPlots= FALSE) -> res
+
+res %>% names
+
+res[[4]]
+```
+
+```{R}
+Hib_Dichotomous_tbw %>% 
+  ungroup %>% 
+  select(SubjectID, `7Y`) %>%
+  mutate(`7Y` = if_else(`7Y` == "≥1.0", "Yes", "No")) %>% 
+  mutate_all(as.factor) %>% 
+  rename(LTPT = `7Y`) -> LTPT_tbl
+
+set.seed(1)
+
+map(Age_Analysis, function(age){
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  check_levels("SubjectID") %>% 
+  intersect(., SubjectID_Analysis) -> subjectID_analysis_feces
+
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  filter(SubjectID %in% subjectID_analysis_feces) %>% 
+  filter_mb(., 0.2) %>% 
+  # mutate(Value = Value/30) %>% 
+  spread(Variable, Value) %>% 
+  select(-Age) %>% 
+  inner_join(LTPT_tbl, .) %>% 
+  c2r("SubjectID") %>% 
+  as.data.frame -> df
+
+coda_glmnet(df[, -1],
+            df[, 1],
+            showPlots = FALSE)}) -> res_list
+
+names(res_list) <- Age_Analysis
+map(res_list, ~ .x[[2]])
+```
 
 
 # Aim4
