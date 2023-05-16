@@ -20,10 +20,7 @@ knitr::opts_chunk$set(echo = FALSE, # chunkを出力として表示するか否�
 
 Sys.setlocale("LC_ALL", 'UTF-8')
 options(scipen = 10)
-```
 
-
-```{R}
 source("RIKENcohort-Vaccine_Setup.R")
 ```
 
@@ -437,6 +434,26 @@ dev.off()
 
 
 # Aim3
+```{R}
+map(Age_Analysis, function(age){
+Genus_tbl %>% 
+    filter(Age %in% age) %>% 
+    select(-Age) %>% 
+    filter_mb(., 0.15) %>% 
+  inner_join(LTPT_tbl) %>% 
+  spread(Variable, Value) %>%
+  gather(Variable, Value, -SubjectID) %>%
+  ungroup %>%
+  mutate(Variable = fct_relevel(Variable, "LTPT")) %>%
+  spread(SubjectID, Value) %>%
+    write.table(glue("Aim3/Table_LTPT_{age}.txt"),
+                col.names = FALSE,
+                row.names = FALSE,
+                quote = FALSE,
+                sep = "\t")})
+
+```
+
 ## Lasso
 ```{R}
 library(caret)
