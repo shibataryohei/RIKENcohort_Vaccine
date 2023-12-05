@@ -434,277 +434,7 @@ dev.off()
 
 
 # Aim3
-## Adonis
-```{R}
-OTU_tbl %>%
-  mutate(Age = droplevels(Age)) %>% 
-  split(., .$Age) %>% 
-  map(~ .x %>% 
-        select(-Age) %>% 
-        spread(Variable, Value) %>% 
-        c2r("SubjectID")) -> OTU_df_list
-
-OTU_df_list %>% 
-  map(~ vegan::vegdist(.x, 
-                 method = "bray")) -> OTU_dist_list
-```
-
-```{R}
-map(OTU_dist_list,
-    ~ ape::pcoa(.x,
-          correction = "lingoes", # Correction methods for negative eigenvalues
-          # lingoes, cailliez, none
-          rn = NULL)) -> OTU_pcoa_list
-
-OTU_pcoa_list %>% 
-  map(~ .x %>% 
-        .$values %>% 
-        #.$Relative_eig %>% 
-        .$Rel_corr_eig %>% 
-      as.numeric) -> Contribution_list
-```
-
-```{R}
-pmap(list(OTU_pcoa_list,
-          Contribution_list,
-          names(Contribution_list)),
-     function(pcoa, v, data){
-       pcoa1 = sprintf("%.1f", v[1]*100)
-       pcoa2 = sprintf("%.1f", v[2]*100)
-       
-  pcoa %>% 
-        .$vectors %>%
-    as.data.frame %>% 
-    tibble::rownames_to_column(., "SubjectID") %>% 
-  .[, 1:3] %>% 
-  rename(Axis1 = Axis.1,
-         Axis2 = Axis.2) %>% 
-  mutate(Data = data) %>% 
-    c2f %>% 
-    inner_join(LTPT_tbl) %>% 
-  ggplot(., aes(x = Axis1, y = Axis2, fill = LTPT))+
-  geom_point(pch = 21,
-             alpha = 0.8,
-             size = 1)+
-  theme(legend.key.size = unit(3, "mm")) +
-         xlab(glue("PCoA1 ({pcoa1}%)"))+
-    ylab(glue("PCoA2 ({pcoa2}%)"))+
-    stat_ellipse(aes(color = LTPT),
-                 linetype = "dashed")+
-    guides(fill = FALSE)+
-    guides(color = FALSE)
-  }) -> OTU_PCoA_gg_list
-
-ggpubr::ggarrange(plotlist = OTU_PCoA_gg_list,
-                  labels = names(OTU_PCoA_gg_list),
-                  hjust = -0.65,
-                  # vjust = -1,
-                  # heights = c(1, 1, 1),
-                  # widths = c(1, 1, 1),
-                  nrow = 1) %>% 
-  ggsave("Aim3/PCoA_LTPT.png",
-       plot = .,
-       dpi = 600,
-       h = 2.4, w = 11.5)
-```
-
-```{R}
-OTU_dist_list %>% 
-  imap(., function(dist, age){
-    
-    vegan::adonis2(dist ~ LTPT,
-              permutations = 999,
-              method = "euclidean",
-              data = LTPT_tbl %>% 
-                c2r("SubjectID") %>% 
-                .[attr(dist, "Labels"), ,
-                  drop = FALSE]
-                  ) %>%
-  as.data.frame %>%
-  r2c("Variable") %>% 
-      mutate(Age = age)}) -> Adonis_LTPT_tbw_list
-
-Adonis_LTPT_tbw_list %>% 
-  do.call(bind_rows, .) %>% 
-  filter(Variable == "LTPT")
-
-```
-
-```{R}
-map(Age_Analysis, function(age){
-Genus_tbl %>% 
-    filter(Age %in% age) %>% 
-    select(-Age) %>% 
-    filter_mb(., 0.15) %>% 
-  inner_join(LTPT_tbl) %>% 
-  spread(Variable, Value) %>%
-  gather(Variable, Value, -SubjectID) %>%
-  ungroup %>%
-  mutate(Variable = fct_relevel(Variable, "LTPT")) %>%
-  spread(SubjectID, Value) %>%
-    write.table(glue("Aim3/Table_LTPT_{age}.txt"),
-                col.names = FALSE,
-                row.names = FALSE,
-                quote = FALSE,
-                sep = "\t")})
-
-```
-
-## Lasso
-```{R}
-library(caret)
-library(tidyverse)
-
-Hib_Dichotomous_tbw %>% 
-  ungroup %>% 
-  select(SubjectID, `7Y`) %>%
-  mutate(`7Y` = if_else(`7Y` == "≥1.0", "Yes", "No")) %>% 
-  mutate_all(as.factor) %>% 
-  rename(LTPT = `7Y`) -> LTPT_tbl
-
-map(Age_Analysis, function(age){
-Genus_tbl %>% 
-  filter(Age == age) %>% 
-  check_levels("SubjectID") %>% 
-  intersect(., SubjectID_Analysis) -> subjectID_analysis_feces
-
-Genus_tbl %>% 
-  filter(Age == age) %>% 
-  filter(SubjectID %in% subjectID_analysis_feces) %>% 
-  filter_mb(., 0.2) %>% 
-  mutate(Value = Value/3) %>% 
-  spread(Variable, Value) %>% 
-  select(-Age) %>% 
-  inner_join(LTPT_tbl) %>% 
-  c2r("SubjectID") %>% 
-  as.data.frame -> genus_lasso_df
-
-myTrainingControl <- trainControl(method = "LOOCV", 
-                                  returnResamp = "all",
-                                  savePredictions = TRUE, 
-                                  classProbs = TRUE,
-                                  summaryFunction = twoClassSummary,
-                                  preProcOptions = NULL)
-# Grid
-train_grid.lasso <- expand.grid(alpha  = 1, # 1, lasso; 0, ridge
-                                lambda = seq(0, 1, by = 0.01)) # 0.001
-
-fit_lasso <- caret::train(LTPT ~ .,  
-                          data   = genus_lasso_df, 
-                          method = "glmnet", 
-                          metric = "ROC",  
-                          tuneGrid  = train_grid.lasso,
-                          trControl = myTrainingControl)
-
-# Decide model to evaluate
-model_lasso_final <- fit_lasso 
-
-# Function get best result 
-model_lasso_final$bestTune %>% 
-  rownames -> best_n
-
-model_lasso_final$results %>% 
-  .[best_n, ] %>% 
-  as.data.frame -> best_result
-
-best_result$lambda -> best_lambda
-
-# Result of best parameter1
-model_lasso_final$finalModel %>% 
-  coef(., s = best_lambda) %>% 
-  exp -> lasso_full.or
-
-# Result of best parameter
-coef(model_lasso_final$finalModel,
-     model_lasso_final$bestTune$lambda) %>% 
-  as.matrix %>% 
-  as.data.frame %>% 
-  r2c("Variable") %>% 
-  filter(!grepl("ntercept", Variable)) %>% 
-  rename(Coef = s1) %>% 
-  filter(Coef != 0) %>% 
-  filter(!grepl("Intercept", Variable)) %>% 
-  .$Variable -> variable_lasso
-
-genus_lasso_df %>% 
-  .[, c(variable_lasso, "LTPT")] -> genus_lasso2_df
-
-# Bootstrap
-set.seed(1202)
-furrr::future_map(1:2000, function(i){
-  
-  sample(x = 1:nrow(genus_lasso2_df), 
-          size = nrow(genus_lasso2_df), # 21
-          replace = T) -> boot_rows
-  
-  genus_lasso2_df %>% 
-    .[boot_rows, ] -> genus_lasso_bootstrap_df
-  
-  boot.lasso_full <- caret::train(LTPT ~ .,  
-                            data   = genus_lasso_bootstrap_df, 
-                            method = "glmnet", 
-                            metric = "ROC",  
-                            tuneGrid  = expand.grid(lambda = best_lambda,
-                                                    alpha = 0),
-                            trControl = myTrainingControl)
-  
-  coef(boot.lasso_full$finalModel,
-       s = best_lambda) %>% 
-    as.matrix %>% 
-    as.data.frame %>% 
-    r2c("Variable") %>% 
-    filter(!grepl("Intercept", Variable)) %>% 
-    mutate(Simulation = i) %>% 
-    rename(coef = s1)}) -> list
-
-list %>% 
-  do.call(bind_rows, .) %>% 
-  group_by(Variable) %>% 
-  summarise(OR = exp(quantile(coef, 0.5, na.rm = T)),
-            lowCI = exp(quantile(coef, 0.025, na.rm = T)),
-            upCI = exp(quantile(coef, 0.975, na.rm = T)))}) -> res_tbw_list
-
-names(res_tbw_list) <- Age_Analysis
-
-imap(res_tbw_list, ~ write_csv(.x, glue("/Users/shibataryohei/Dropbox/Database/RIKENcohort/CSV/Lasso_{.y}.csv")))
-
-map(res_tbw_list, ~ .x %>% 
-      filter(OR < 1 & upCI < 1|OR > 1 & lowCI > 1))
-```
-
-```{R}
-map(Age_Analysis, function(age){
-Genus_tbl %>% 
-  filter(Age == age) %>% 
-  check_levels("SubjectID") %>% 
-  intersect(., SubjectID_Analysis) -> subjectID_analysis_feces
-
-Genus_tbl %>% 
-  filter(Age == age) %>% 
-  filter(SubjectID %in% subjectID_analysis_feces) %>% 
-  filter_mb(., 0.2) %>% 
-  inner_join(LTPT_tbl) %>% 
-  group_bye
-```
-
-
-```{R}
-res_tbw -> Lasso_1W_tbw
-
-map(res_tbw_list, function(tbw){
-  tbw %>% 
-  filter(OR > 1&lowCI>1|OR <= 1&upCI<=1)
-})
-
-
-write_csv(Lasso_1W_tbw, "CSV/Lasso_1W.csv")
-```
-
-
-
-
-
-## Figure 3: mb --> LTPT
+## Figure 3A: forest plot
 ```{R}
 Alpha_tbl %>% 
   filter(Variable_Feces == "Shannon") %>% 
@@ -869,6 +599,304 @@ forestplot::forestplot(labeltext = list,
 dev.off()
 ```
 ![](/Users/shibataryohei/Dropbox/Manuscript/RIKENcohort-Vaccine/Figure/Figure2.tiff)
+
+## Figure 3B: Adonis
+```{R}
+OTU_tbl %>%
+  mutate(Age = droplevels(Age)) %>% 
+  split(., .$Age) %>% 
+  map(~ .x %>% 
+        select(-Age) %>% 
+        spread(Variable, Value) %>% 
+        c2r("SubjectID")) -> OTU_df_list
+
+OTU_df_list %>% 
+  map(~ vegan::vegdist(.x, 
+                 method = "bray")) -> OTU_dist_list
+```
+
+```{R}
+map(OTU_dist_list,
+    ~ ape::pcoa(.x,
+          correction = "lingoes", # Correction methods for negative eigenvalues
+          # lingoes, cailliez, none
+          rn = NULL)) -> OTU_pcoa_list
+
+OTU_pcoa_list %>% 
+  map(~ .x %>% 
+        .$values %>% 
+        #.$Relative_eig %>% 
+        .$Rel_corr_eig %>% 
+      as.numeric) -> Contribution_list
+```
+
+```{R}
+pmap(list(OTU_pcoa_list,
+          Contribution_list,
+          names(Contribution_list)),
+     function(pcoa, v, data){
+       pcoa1 = sprintf("%.1f", v[1]*100)
+       pcoa2 = sprintf("%.1f", v[2]*100)
+       
+  pcoa %>% 
+        .$vectors %>%
+    as.data.frame %>% 
+    tibble::rownames_to_column(., "SubjectID") %>% 
+  .[, 1:3] %>% 
+  rename(Axis1 = Axis.1,
+         Axis2 = Axis.2) %>% 
+  mutate(Data = data) %>% 
+    c2f %>% 
+    inner_join(LTPT_tbl) %>% 
+  ggplot(., aes(x = Axis1, y = Axis2, fill = LTPT))+
+  geom_point(pch = 21,
+             alpha = 0.8,
+             size = 1)+
+  theme(legend.key.size = unit(3, "mm")) +
+         xlab(glue("PCoA1 ({pcoa1}%)"))+
+    ylab(glue("PCoA2 ({pcoa2}%)"))+
+    stat_ellipse(aes(color = LTPT),
+                 linetype = "dashed")+
+    guides(fill = FALSE)+
+    guides(color = FALSE)
+  }) -> OTU_PCoA_gg_list
+
+ggpubr::ggarrange(plotlist = OTU_PCoA_gg_list,
+                  labels = names(OTU_PCoA_gg_list),
+                  hjust = -0.65,
+                  # vjust = -1,
+                  # heights = c(1, 1, 1),
+                  # widths = c(1, 1, 1),
+                  nrow = 1) %>% 
+  ggsave("Aim3/PCoA_LTPT.png",
+       plot = .,
+       dpi = 600,
+       h = 2.4, w = 11.5)
+```
+
+```{R}
+OTU_dist_list %>% 
+  imap(., function(dist, age){
+    
+    vegan::adonis2(dist ~ LTPT,
+              permutations = 999,
+              method = "euclidean",
+              data = LTPT_tbl %>% 
+                c2r("SubjectID") %>% 
+                .[attr(dist, "Labels"), ,
+                  drop = FALSE]
+                  ) %>%
+  as.data.frame %>%
+  r2c("Variable") %>% 
+      mutate(Age = age)}) -> Adonis_LTPT_tbw_list
+
+Adonis_LTPT_tbw_list %>% 
+  do.call(bind_rows, .) %>% 
+  filter(Variable == "LTPT")
+
+```
+
+```{R}
+map(Age_Analysis, function(age){
+Genus_tbl %>% 
+    filter(Age %in% age) %>% 
+    select(-Age) %>% 
+    filter_mb(., 0.15) %>% 
+  inner_join(LTPT_tbl) %>% 
+  spread(Variable, Value) %>%
+  gather(Variable, Value, -SubjectID) %>%
+  ungroup %>%
+  mutate(Variable = fct_relevel(Variable, "LTPT")) %>%
+  spread(SubjectID, Value) %>%
+    write.table(glue("Aim3/Table_LTPT_{age}.txt"),
+                col.names = FALSE,
+                row.names = FALSE,
+                quote = FALSE,
+                sep = "\t")})
+
+```
+
+## Figure 3C: LEfSe
+```{R}
+Genus_tbl %>% 
+  mutate(Age = droplevels(Age)) %>% 
+  split(., .$Age) %>% 
+  map(~ .x %>% 
+        select(-Age)) -> Genus_tbl_list
+
+Genus_tbl_list %>% 
+  imap(~ .x %>% 
+        inner_join(LTPT_tbl) %>%
+         filter_mb(., 0.15) %>% 
+  spread(Variable, Value) %>%
+  gather(Variable, Value, -SubjectID) %>%
+  ungroup %>%
+  mutate(Variable = fct_relevel(Variable, "LTPT")) %>%
+  spread(SubjectID, Value) %>%
+    write.table(glue("Aim3/Table_Genus_LTPT_{.y}.txt"),
+                col.names = FALSE,
+                row.names = FALSE,
+                quote = FALSE,
+                sep="\t"))
+
+```
+
+## Lasso
+```{R}
+library(caret)
+library(tidyverse)
+
+Hib_Dichotomous_tbw %>% 
+  ungroup %>% 
+  select(SubjectID, `7Y`) %>%
+  mutate(`7Y` = if_else(`7Y` == "≥1.0", "Yes", "No")) %>% 
+  mutate_all(as.factor) %>% 
+  rename(LTPT = `7Y`) -> LTPT_tbl
+
+map(Age_Analysis, function(age){
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  check_levels("SubjectID") %>% 
+  intersect(., SubjectID_Analysis) -> subjectID_analysis_feces
+
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  filter(SubjectID %in% subjectID_analysis_feces) %>% 
+  filter_mb(., 0.2) %>% 
+  mutate(Value = Value/3) %>% 
+  spread(Variable, Value) %>% 
+  select(-Age) %>% 
+  inner_join(LTPT_tbl) %>% 
+  c2r("SubjectID") %>% 
+  as.data.frame -> genus_lasso_df
+
+myTrainingControl <- trainControl(method = "LOOCV", 
+                                  returnResamp = "all",
+                                  savePredictions = TRUE, 
+                                  classProbs = TRUE,
+                                  summaryFunction = twoClassSummary,
+                                  preProcOptions = NULL)
+# Grid
+train_grid.lasso <- expand.grid(alpha  = 1, # 1, lasso; 0, ridge
+                                lambda = seq(0, 1, by = 0.01)) # 0.001
+
+fit_lasso <- caret::train(LTPT ~ .,  
+                          data   = genus_lasso_df, 
+                          method = "glmnet", 
+                          metric = "ROC",  
+                          tuneGrid  = train_grid.lasso,
+                          trControl = myTrainingControl)
+
+# Decide model to evaluate
+model_lasso_final <- fit_lasso 
+
+# Function get best result 
+model_lasso_final$bestTune %>% 
+  rownames -> best_n
+
+model_lasso_final$results %>% 
+  .[best_n, ] %>% 
+  as.data.frame -> best_result
+
+best_result$lambda -> best_lambda
+
+# Result of best parameter1
+model_lasso_final$finalModel %>% 
+  coef(., s = best_lambda) %>% 
+  exp -> lasso_full.or
+
+# Result of best parameter
+coef(model_lasso_final$finalModel,
+     model_lasso_final$bestTune$lambda) %>% 
+  as.matrix %>% 
+  as.data.frame %>% 
+  r2c("Variable") %>% 
+  filter(!grepl("ntercept", Variable)) %>% 
+  rename(Coef = s1) %>% 
+  filter(Coef != 0) %>% 
+  filter(!grepl("Intercept", Variable)) %>% 
+  .$Variable -> variable_lasso
+
+genus_lasso_df %>% 
+  .[, c(variable_lasso, "LTPT")] -> genus_lasso2_df
+
+# Bootstrap
+set.seed(1202)
+furrr::future_map(1:2000, function(i){
+  
+  sample(x = 1:nrow(genus_lasso2_df), 
+          size = nrow(genus_lasso2_df), # 21
+          replace = T) -> boot_rows
+  
+  genus_lasso2_df %>% 
+    .[boot_rows, ] -> genus_lasso_bootstrap_df
+  
+  boot.lasso_full <- caret::train(LTPT ~ .,  
+                            data   = genus_lasso_bootstrap_df, 
+                            method = "glmnet", 
+                            metric = "ROC",  
+                            tuneGrid  = expand.grid(lambda = best_lambda,
+                                                    alpha = 0),
+                            trControl = myTrainingControl)
+  
+  coef(boot.lasso_full$finalModel,
+       s = best_lambda) %>% 
+    as.matrix %>% 
+    as.data.frame %>% 
+    r2c("Variable") %>% 
+    filter(!grepl("Intercept", Variable)) %>% 
+    mutate(Simulation = i) %>% 
+    rename(coef = s1)}) -> list
+
+list %>% 
+  do.call(bind_rows, .) %>% 
+  group_by(Variable) %>% 
+  summarise(OR = exp(quantile(coef, 0.5, na.rm = T)),
+            lowCI = exp(quantile(coef, 0.025, na.rm = T)),
+            upCI = exp(quantile(coef, 0.975, na.rm = T)))}) -> res_tbw_list
+
+names(res_tbw_list) <- Age_Analysis
+
+imap(res_tbw_list, ~ write_csv(.x, glue("/Users/shibataryohei/Dropbox/Database/RIKENcohort/CSV/Lasso_{.y}.csv")))
+
+map(res_tbw_list, ~ .x %>% 
+      filter(OR < 1 & upCI < 1|OR > 1 & lowCI > 1))
+```
+
+
+```{R}
+map(Age_Analysis, function(age){
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  check_levels("SubjectID") %>% 
+  intersect(., SubjectID_Analysis) -> subjectID_analysis_feces
+
+Genus_tbl %>% 
+  filter(Age == age) %>% 
+  filter(SubjectID %in% subjectID_analysis_feces) %>% 
+  filter_mb(., 0.2) %>% 
+  inner_join(LTPT_tbl) %>% 
+  group_bye
+```
+
+
+```{R}
+res_tbw -> Lasso_1W_tbw
+
+map(res_tbw_list, function(tbw){
+  tbw %>% 
+  filter(OR > 1&lowCI>1|OR <= 1&upCI<=1)
+})
+
+
+write_csv(Lasso_1W_tbw, "CSV/Lasso_1W.csv")
+```
+
+
+
+
+
+
 
 
 ## coda4microbiome
