@@ -738,6 +738,92 @@ Genus_tbl_list %>%
                 row.names = FALSE,
                 quote = FALSE,
                 sep="\t"))
+```
+
+
+```{R}
+Ages <- c("1W", "1M", "1Y", "5Y", "7Y")
+
+map(Ages, function(age){
+  read_delim(glue("/Users/shibataryohei/Dropbox/Database/RIKENcohort/Vaccine/LEfSe_{age}.lefse_internal_res"),
+           col_names = FALSE) %>% 
+  rename(Variable = X1,
+                      LDA = X2,
+                      LTPT = X3,
+                      adj.LDA = X4,
+                      P.value = X5) %>%
+        dplyr::select(Variable, LDA, LTPT, P.value) %>% 
+    mutate(Age = age)}) %>% 
+  do.call(bind_rows, .) -> tbw
+
+tbw %>% 
+  filter(!is.na(LTPT)) %>% 
+  .$Variable %>% 
+  as.factor %>% 
+  levels -> var_sd
+
+Genus_tbl %>% 
+  inner_join(LTPT_tbl) %>% 
+  mutate(Age = droplevels(Age)) %>% 
+  split(., .$Age) -> Genus_tbl_list
+
+Genus_tbl_list %>% 
+  map(~ .x %>% 
+        filter_mb(., 0.25) %>% 
+        .$Variable %>% 
+        droplevels %>% 
+        levels %>% 
+        length)
+
+Genus_tbl_list %>% 
+  map(~ .x %>% 
+        filter_mb(., 0.25) %>% 
+        group_by(Variable, Age) %>% 
+        wilcox_test(Value ~ LTPT) %>% 
+        mutate(FDR = qvalue_r(p))) -> tbw
+
+tbw %>% 
+  do.call(bind_rows, .) %>% 
+  filter(p < 0.05) %>% 
+  select(Variable, Age) -> Genus_Wilcox_SD_tbw
+
+Genus_tbl %>% 
+  inner_join(Genus_Wilcox_SD_tbw) %>% 
+    inner_join(LTPT_tbl) %>% 
+  unite(Variable, Variable, Age, sep = "@") %>% 
+    ggplot(., aes(x = LTPT, y = Value))+
+  # geom_jitter()+
+  # geom_boxplot(alpha = 0.8, outlier.shape = NA)+
+  
+  geom_boxplot(alpha = 0.8,
+             color = "darkgray",
+             size = 0.25,
+             outlier.shape = NA)+
+  ggbeeswarm::geom_quasirandom(size = 1,
+                               pch = 21,
+                               aes(fill = LTPT))+
+  facet_wrap(~ Variable, scale = "free", nrow = 2)
+```
+
+
+```{R}
+tbw %>% 
+  filter(Variable %in% var_sd) %>% 
+  mutate(P.value = as.numeric(P.value)) %>% 
+  select(Variable, P.value, Age) %>% 
+  mutate(P.value = add_sd(P.value)) %>% 
+  spread(Age, P.value) %>% 
+  c2r("Variable") %>% 
+  select(`1W`, everything()) -> SD_df
+
+tbw %>% 
+  filter(Variable %in% var_sd) %>% 
+  select(Variable, LDA, Age) %>% 
+  spread(Age, LDA) %>% 
+  c2r("Variable") %>% 
+  select(`1W`, everything()) -> LDA_df
+
+
 
 ```
 
