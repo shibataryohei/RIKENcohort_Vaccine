@@ -1,0 +1,5 @@
+Difference of relative abundance of the gut microbiota between subjects with and without long-term protective titer
+
+Beeswarm plots represent relative abundance of the gut microbiota in genus level that significantly differed between subjects with and without long-term protective titer at seven years of age using the Wilcoxon rank-sum test. In the box-and-whisker plots, boxes and whiskers show the median and interquartile range (IQR) and 1.5 times the IQR, respectively. In the overlying bee swarm plots, each point denotes each subject, and the width represents the probability that infants in a group take on a specific value.
+
+Abbreviation: FDR, false discovery rate; M, month of age; Y, year of age.
