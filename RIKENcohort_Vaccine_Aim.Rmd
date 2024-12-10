@@ -998,6 +998,9 @@ forestplot::forestplot(labeltext = forest_list,
            col = fpColors(lines = "black", # line of color 
                           zero = "gray50"),
            zero = 1,
+           zero = 1,
+           zero = 1,
+           zero = 1,
            cex = 1.3,
            
            lineheight = unit(6,"mm"), # line interval
